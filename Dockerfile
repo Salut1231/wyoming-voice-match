@@ -15,6 +15,9 @@ RUN pip install --no-cache-dir \
     pip install --no-cache-dir -r requirements.txt && \
     # Uninstall triton (~600MB, not needed for inference)
     pip uninstall -y triton 2>/dev/null; \
+    # Remove nvidia CUDA pip packages (~2.7GB) - PyTorch torch/lib has what it needs
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia_*.dist-info && \
     # Strip PyTorch
     find /usr/local/lib/python3.10/dist-packages/torch -name "*.a" -delete && \
     find /usr/local/lib/python3.10/dist-packages/torch -name "test" -type d -exec rm -rf {} + 2>/dev/null; \
@@ -31,6 +34,8 @@ RUN pip install --no-cache-dir \
     rm -rf /usr/local/lib/python3.10/dist-packages/torch/include && \
     rm -rf /usr/local/lib/python3.10/dist-packages/torch/share && \
     rm -rf /usr/local/lib/python3.10/dist-packages/torch/bin && \
+    # Remove sympy and networkx (torch deps not needed at runtime for inference)
+    pip uninstall -y sympy networkx 2>/dev/null; \
     rm -rf /usr/local/lib/python3.10/dist-packages/speechbrain/recipes && \
     rm -rf /usr/local/lib/python3.10/dist-packages/speechbrain/tests && \
     find /usr/local/lib/python3.10/dist-packages -name "tests" -type d -exec rm -rf {} + 2>/dev/null; \
@@ -38,7 +43,7 @@ RUN pip install --no-cache-dir \
     echo "Cleanup complete"
 
 # --- Runtime stage ---
-FROM nvidia/cuda:12.1.1-base-ubuntu22.04
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
 LABEL maintainer="Wyoming Voice Match"
 LABEL description="Wyoming ASR proxy with ECAPA-TDNN speaker verification"
@@ -58,8 +63,6 @@ RUN apt-get update && \
 # Copy only the installed Python packages from builder
 COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-# Copy CUDA runtime libs needed by PyTorch from builder
-COPY --from=builder /usr/local/cuda/lib64 /usr/local/cuda/lib64
 
 # Copy application code
 COPY wyoming_voice_match/ wyoming_voice_match/
@@ -67,8 +70,6 @@ COPY scripts/ scripts/
 
 # Create data directory structure
 RUN mkdir -p /data/enrollment /data/voiceprints /data/models
-
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 EXPOSE 10350
 
