@@ -1,0 +1,16 @@
+.git
+.gitignore
+.vscode
+.idea
+__pycache__
+*.py[cod]
+*.egg-info
+dist
+build
+data/enrollment/*/
+data/voiceprints/*.npy
+data/models/
+README.md
+LICENSE
+docker-compose.yml
+docker-compose.cpu.yml

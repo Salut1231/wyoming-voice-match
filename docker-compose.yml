@@ -1,0 +1,25 @@
+services:
+  voice-match:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wyoming-voice-match:latest
+    container_name: wyoming-voice-match
+    restart: unless-stopped
+    ports:
+      - "10350:10350"
+    volumes:
+      - ./data:/data
+    environment:
+      - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
+      - THRESHOLD=0.45
+      - LISTEN_URI=tcp://0.0.0.0:10350
+      - DEVICE=cuda
+      - LOG_LEVEL=DEBUG
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
