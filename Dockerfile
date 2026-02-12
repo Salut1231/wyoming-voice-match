@@ -17,10 +17,32 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install PyTorch (CUDA 12.1) with minimal footprint, then app dependencies
+# Then strip unnecessary files to reduce image size
 COPY requirements.txt .
 RUN pip install --no-cache-dir \
         torch torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    # Remove PyTorch test/debug files
+    find /usr/local/lib/python3.10/dist-packages/torch -name "*.a" -delete && \
+    find /usr/local/lib/python3.10/dist-packages/torch -name "test" -type d -exec rm -rf {} + 2>/dev/null; \
+    find /usr/local/lib/python3.10/dist-packages/torch -name "tests" -type d -exec rm -rf {} + 2>/dev/null; \
+    # Remove unused CUDA libs bundled with PyTorch (we only need core + cuDNN)
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libnccl* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libcublas* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libcusparse* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libcusolver* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libcufft* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libcurand* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libnvrtc* && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/torch/lib/libnvJitLink* && \
+    # Remove triton (not needed for inference)
+    rm -rf /usr/local/lib/python3.10/dist-packages/triton && \
+    # Remove numpy tests
+    find /usr/local/lib/python3.10/dist-packages/numpy -name "tests" -type d -exec rm -rf {} + 2>/dev/null; \
+    # Remove SpeechBrain tests and recipes
+    rm -rf /usr/local/lib/python3.10/dist-packages/speechbrain/recipes && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/speechbrain/tests && \
+    echo "Cleanup complete"
 
 # Copy application code
 COPY wyoming_voice_match/ wyoming_voice_match/
