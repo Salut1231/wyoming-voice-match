@@ -124,6 +124,7 @@ async def main() -> None:
                     url="https://github.com/jxlarrea/wyoming-voice-match",
                 ),
                 installed=True,
+                version=__version__,
                 models=[
                     AsrModel(
                         name="voice-match-proxy",
