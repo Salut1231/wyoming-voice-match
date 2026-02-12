@@ -73,9 +73,10 @@ arecord -l
 ```
 
 ```bash
-for i in $(seq 1 5); do
+mkdir -p data/enrollment/john
+for i in $(seq 1 15); do
   echo "Sample $i — speak naturally for 5 seconds..."
-  arecord -r 16000 -c 1 -f S16_LE -d 5 "data/enrollment/john/sample_${i}.wav"
+  arecord -r 16000 -c 1 -f S16_LE -d 5 "data/enrollment/john/john_$(date +%Y%m%d_%H%M%S).wav"
   sleep 1
 done
 ```
@@ -91,9 +92,10 @@ system_profiler SPAudioDataType
 ```
 
 ```bash
-for i in $(seq 1 5); do
+mkdir -p data/enrollment/john
+for i in $(seq 1 15); do
   echo "Sample $i — speak naturally for 5 seconds..."
-  sox -d -r 16000 -c 1 -b 16 "data/enrollment/john/sample_${i}.wav" trim 0 5
+  sox -d -r 16000 -c 1 -b 16 "data/enrollment/john/john_$(date +%Y%m%d_%H%M%S).wav" trim 0 5
   sleep 1
 done
 ```
@@ -121,8 +123,16 @@ Alternatively, use any voice recorder app on your phone or computer and save the
 5. "Good morning, what's on my calendar for today"
 6. "Lock the front door and turn off all the lights downstairs"
 7. "What's the temperature inside the house right now"
+8. "Turn the thermostat up to seventy two degrees"
+9. "Add milk and eggs to my shopping list"
+10. "Dim the bedroom lights to twenty percent"
+11. "What time is my first meeting tomorrow"
+12. "Turn off the TV in the living room"
+13. "Set an alarm for seven thirty in the morning"
+14. "Open the garage door"
+15. "Tell me a joke"
 
-> **Tip:** Vary your distance from the mic, volume, and phrasing across samples. Use your normal everyday voice — don't whisper or shout. The more variety, the more robust your voiceprint will be.
+> **Tip:** Vary your distance from the mic, volume, and phrasing across samples. Record some samples slightly quieter or further away to improve recognition at different volumes. Use your normal everyday voice — the more variety, the more robust your voiceprint will be.
 
 Then run enrollment again to generate the voiceprint:
 
@@ -177,7 +187,17 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 
 ### Tuning the Threshold
 
-Start with `--debug` logging enabled and observe the similarity scores:
+The `THRESHOLD` environment variable controls how strict speaker matching is. Adjust it in `docker-compose.yml` and restart:
+
+| Value | Behavior |
+|-------|----------|
+| `0.30` | Very lenient — accepts most speech, may let TV/others through |
+| `0.35` | Lenient — good if you're often rejected when speaking quietly or far from mic |
+| `0.45` | **Default** — balanced between security and convenience |
+| `0.55` | Strict — fewer false accepts, but may reject you more often |
+| `0.65` | Very strict — high security, requires close mic and clear speech |
+
+Start with debug logging enabled and observe the similarity scores:
 
 ```bash
 docker compose logs -f voice-match
@@ -193,20 +213,28 @@ WARNING: Speaker rejected (similarity=0.1847, threshold=0.45)
 - **Your voice** will typically score **0.45–0.75**
 - **TV/other speakers** will typically score **0.05–0.25**
 - Set the threshold in the gap between these ranges
-- Lower threshold = fewer false rejections but more false accepts
-- Higher threshold = more secure but may reject you if you're far from the mic or speaking unusually
+- If you're getting rejected when speaking quietly, **lower the threshold** or **re-enroll with more samples** recorded at different volumes and distances
 
 ### Re-enrollment
 
-To update a speaker's voiceprint, add or replace WAV files in `data/enrollment/<n>/` and re-run:
+To update a speaker's voiceprint, add more WAV files to `data/enrollment/<speaker>/` and re-run enrollment. The script processes all WAV files in the folder to generate an updated voiceprint.
+
+**Adding more samples on Windows:**
+
+Simply run the recording script again — new files are timestamped and won't overwrite existing ones:
+
+```powershell
+.\tools\record_samples.ps1 -Speaker john
+```
+
+**Adding samples manually:**
+
+Copy additional WAV files (from your phone, another computer, etc.) into the speaker's enrollment folder. Any filename and format will work.
+
+Then re-run enrollment and restart:
 
 ```bash
 docker compose run --rm --entrypoint python voice-match -m scripts.enroll --speaker john
-```
-
-Then restart the service:
-
-```bash
 docker compose restart voice-match
 ```
 

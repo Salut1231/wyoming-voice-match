@@ -19,7 +19,7 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Speaker,
 
-    [int]$Samples = 7,
+    [int]$Samples = 15,
 
     [int]$Duration = 5
 )
@@ -103,14 +103,26 @@ $phrases = @(
     "What is the temperature inside the house right now",
     "Turn the thermostat up to seventy two degrees",
     "Add milk and eggs to my shopping list",
-    "Dim the bedroom lights to twenty percent"
+    "Dim the bedroom lights to twenty percent",
+    "What time is my first meeting tomorrow",
+    "Turn off the TV in the living room",
+    "Set an alarm for seven thirty in the morning",
+    "Open the garage door",
+    "Tell me a joke"
 )
 
-for ($i = 1; $i -le $Samples; $i++) {
-    $outFile = Join-Path $enrollDir "sample_$i.wav"
-    $phrase = $phrases[($i - 1) % $phrases.Count]
+# Find existing samples
+$existing = Get-ChildItem -Path $enrollDir -Filter "*.wav" -ErrorAction SilentlyContinue
+if ($existing) {
+    Write-Host "Found $($existing.Count) existing sample(s) in folder. New samples will be added." -ForegroundColor Cyan
+}
 
-    Write-Host "[$i/$Samples] Say: `"$phrase`"" -ForegroundColor Yellow
+for ($i = 0; $i -lt $Samples; $i++) {
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $outFile = Join-Path $enrollDir "${Speaker}_${timestamp}.wav"
+    $phrase = $phrases[$i % $phrases.Count]
+
+    Write-Host "[$($i + 1)/$Samples] Say: `"$phrase`"" -ForegroundColor Yellow
     Write-Host "  Recording in 2 seconds..." -ForegroundColor DarkGray
     Start-Sleep -Seconds 2
 
@@ -120,10 +132,10 @@ for ($i = 1; $i -le $Samples; $i++) {
     if (Test-Path $outFile) {
         Write-Host "  Saved: $outFile" -ForegroundColor Green
     } else {
-        Write-Host "  Failed to record sample $i" -ForegroundColor Red
+        Write-Host "  Failed to record sample" -ForegroundColor Red
     }
 
-    if ($i -lt $Samples) {
+    if ($i -lt ($Samples - 1)) {
         Start-Sleep -Seconds 1
     }
 }
