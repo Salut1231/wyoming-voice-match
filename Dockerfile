@@ -15,8 +15,9 @@ RUN pip install --no-cache-dir \
     pip install --no-cache-dir -r requirements.txt && \
     # Uninstall triton (~600MB, not needed for inference)
     pip uninstall -y triton 2>/dev/null; \
-    # Remove nccl (multi-GPU communication, not needed for single-GPU inference)
-    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/nccl && \
+    # Remove nvidia CUDA pip packages - runtime base provides these, except cusparselt
+    find /usr/local/lib/python3.10/dist-packages/nvidia -mindepth 1 -maxdepth 1 -type d \
+        ! -name "cusparselt*" ! -name "__pycache__" -exec rm -rf {} + && \
     # Strip PyTorch
     find /usr/local/lib/python3.10/dist-packages/torch -name "*.a" -delete && \
     find /usr/local/lib/python3.10/dist-packages/torch -name "test" -type d -exec rm -rf {} + 2>/dev/null; \
@@ -42,7 +43,7 @@ RUN pip install --no-cache-dir \
     echo "Cleanup complete"
 
 # --- Runtime stage ---
-FROM nvidia/cuda:12.1.1-base-ubuntu22.04
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
 LABEL maintainer="Wyoming Voice Match"
 LABEL description="Wyoming ASR proxy with ECAPA-TDNN speaker verification"
@@ -69,9 +70,6 @@ COPY scripts/ scripts/
 
 # Create data directory structure
 RUN mkdir -p /data/enrollment /data/voiceprints /data/models
-
-# Add nvidia pip package library paths
-ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cufft/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cusparse/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cusolver/lib:/usr/local/lib/python3.10/dist-packages/nvidia/curand/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cuda_cupti/lib:/usr/local/lib/python3.10/dist-packages/nvidia/nvjitlink/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cuda_nvrtc/lib:$LD_LIBRARY_PATH
 
 EXPOSE 10350
 
