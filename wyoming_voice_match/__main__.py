@@ -43,8 +43,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=float(os.environ.get("THRESHOLD", "0.30")),
-        help="Cosine similarity threshold for verification (default: 0.30)",
+        default=float(os.environ.get("VERIFY_THRESHOLD", "0.20")),
+        help="Cosine similarity threshold for verification (default: 0.20)",
     )
     parser.add_argument(
         "--device",
@@ -72,20 +72,20 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--window-seconds",
         type=float,
-        default=float(os.environ.get("WINDOW_SECONDS", "3.0")),
+        default=float(os.environ.get("VERIFY_WINDOW_SECONDS", "3.0")),
         help="Sliding window size in seconds for fallback verification (default: 3.0)",
     )
     parser.add_argument(
         "--step-seconds",
         type=float,
-        default=float(os.environ.get("STEP_SECONDS", "1.5")),
+        default=float(os.environ.get("VERIFY_STEP_SECONDS", "1.5")),
         help="Sliding window step in seconds (default: 1.5)",
     )
     parser.add_argument(
         "--asr-max-seconds",
         type=float,
-        default=float(os.environ.get("ASR_MAX_SECONDS", "10.0")),
-        help="Max audio duration (seconds) forwarded to upstream ASR (default: 10.0)",
+        default=float(os.environ.get("ASR_MAX_SECONDS", "3.0")),
+        help="Max audio duration (seconds) forwarded to upstream ASR (default: 3.0)",
     )
 
     return parser.parse_args()

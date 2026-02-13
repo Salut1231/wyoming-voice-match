@@ -1,34 +1,52 @@
 # Wyoming Voice Match
 
-A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifies speaker identity before forwarding audio to a downstream speech-to-text service. Designed for [Home Assistant](https://www.home-assistant.io/) voice pipelines to prevent false activations from TVs, radios, and other people.
+A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifies speaker identity and isolates voice commands from background noise before forwarding audio to a downstream speech-to-text service. Designed for [Home Assistant](https://www.home-assistant.io/) voice pipelines to prevent false activations from TVs, radios, and other people — and to deliver clean transcripts even in noisy environments.
+
+## The Problem
+
+Home Assistant voice satellites listen for a wake word, then stream audio to a speech-to-text service. But the satellite microphone picks up everything — your voice, the TV in the background, other people talking. This causes two issues:
+
+1. **False activations**: The TV says something that triggers a command
+2. **Noisy transcripts**: Your voice command gets mixed with TV dialogue, producing garbage like *"What time is it? People look at you like some kind of service freak"*
+
+Wyoming Voice Match solves both: it verifies that the audio contains **your voice** before allowing it through, and it trims the audio buffer so only your command — not the TV — reaches the speech-to-text service.
 
 ## How It Works
 
-Wyoming Voice Match sits between your wake word detector and your ASR service. When a wake word is detected and audio streams in, this service:
-
-1. Buffers the incoming audio
-2. Extracts a speaker embedding using [SpeechBrain's ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) model
-3. Compares the embedding against your enrolled voiceprint using cosine similarity
-4. **If the speaker matches**: forwards audio to your real ASR service and returns the transcript
-5. **If the speaker doesn't match**: returns an empty transcript, silently stopping the pipeline
+Wyoming Voice Match sits between Home Assistant and your ASR (speech-to-text) service. When a wake word is detected, Home Assistant opens a connection and starts streaming audio. Here's what happens:
 
 ```
 ┌──────────┐     ┌─────────────────┐     ┌───────────────────────┐     ┌──────────────┐
-│   Mic    │────▶│ openwakeword    │────▶│ wyoming-voice-match   │────▶│ ASR Service  │
-│ (Device) │     │ (Wake Word)     │     │ (Speaker Gate)        │     │ (Transcribe) │
-└──────────┘     └─────────────────┘     └───────────────────────┘     └──────────────┘
-                                                   │
-                                                   ▼
-                                          Speaker doesn't match?
-                                          → Empty transcript returned
-                                          → Pipeline stops silently
+│   Mic    │────▶│  Wake Word      │────▶│  Wyoming Voice Match  │────▶│ ASR Service  │
+│ (Device) │     │  Detection      │     │                       │     │ (Transcribe) │
+└──────────┘     └─────────────────┘     │  1. Buffer audio      │     └──────────────┘
+                                         │  2. Detect speech     │
+                                         │  3. Verify speaker    │
+                                         │  4. Trim & forward    │
+                                         │     or reject         │
+                                         └───────────────────────┘
 ```
+
+### Step by step
+
+1. **Buffer audio** — audio streams in from Home Assistant after the wake word is detected
+2. **Detect speech** — an energy analysis isolates the loudest segment of audio (your voice near the mic), separating it from background noise like a TV
+3. **Verify speaker** — the speech segment is compared against your enrolled voiceprint using an [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) neural network. If it doesn't match any enrolled speaker, the pipeline is silently stopped with an empty transcript
+4. **Forward to ASR** — once verified, the first few seconds of audio are forwarded to your speech-to-text service, trimming off any trailing background noise
+5. **Respond immediately** — the transcript is returned to Home Assistant without waiting for the audio stream to end, bypassing VAD delays caused by background noise
+
+**The result:**
+
+- In a quiet room, Voice Match adds only milliseconds of overhead to your existing pipeline — verification is nearly instant
+- With a TV blaring, the VAD can't detect silence and keeps the stream open for 15+ seconds. Voice Match bypasses this by starting verification at 5 seconds and responding immediately, cutting response time to ~5 seconds
+- TV audio and other speakers get rejected with low similarity scores
+- Your voice commands get clean transcripts without TV dialogue mixed in
 
 ## Requirements
 
 - Docker and Docker Compose
 - NVIDIA GPU (recommended) or CPU
-- A downstream Wyoming-compatible ASR service (e.g., [wyoming-faster-whisper](https://github.com/rhasspy/wyoming-faster-whisper), [wyoming-whisper](https://github.com/rhasspy/wyoming-whisper))
+- A downstream Wyoming-compatible ASR service (e.g., [wyoming-faster-whisper](https://github.com/rhasspy/wyoming-faster-whisper), [wyoming-onnx-asr](https://github.com/tboby/wyoming-onnx-asr))
 
 ## Quick Start
 
@@ -46,7 +64,7 @@ Edit `docker-compose.yml` and set your upstream ASR URI and preferences in the `
 ```yaml
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - THRESHOLD=0.30
+      - VERIFY_THRESHOLD=0.20
       - LISTEN_URI=tcp://0.0.0.0:10350
       - DEVICE=cuda
       - HF_HOME=/data/hf_cache
@@ -122,7 +140,7 @@ Alternatively, use any voice recorder app on your phone or computer and save the
 4. "Lock the front door and turn off all the lights downstairs"
 5. "What's the temperature inside the house right now"
 
-> **Tip:** We've found the best results come from enrolling with **30 samples** at varied volumes and distances. The Windows recording script (`.\tools\record_samples.ps1`) will prompt you through all 30 with suggested phrases. On Linux/macOS, adjust the loop count as needed. The more variety in your samples, the more robust your voiceprint will be.
+> **Tip:** The best results come from enrolling with **30 samples** at varied volumes and distances. The Windows recording script (`.\tools\record_samples.ps1`) will prompt you through all 30 with suggested phrases. On Linux/macOS, adjust the loop count as needed. The more variety in your samples, the more robust your voiceprint will be.
 
 Then run enrollment again to generate the voiceprint:
 
@@ -169,23 +187,24 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | Variable | Default | Description |
 |---|---|---|
 | `UPSTREAM_URI` | `tcp://localhost:10300` | Wyoming URI of your real ASR service |
-| `THRESHOLD` | `0.30` | Cosine similarity threshold for speaker verification (0.0–1.0) |
+| `VERIFY_THRESHOLD` | `0.20` | Cosine similarity threshold for speaker verification (0.0–1.0) |
 | `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
 | `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`) |
 | `HF_HOME` | `/data/hf_cache` | HuggingFace cache directory for model downloads (persisted via volume) |
 | `LOG_LEVEL` | `DEBUG` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `MAX_VERIFY_SECONDS` | `5.0` | Duration of audio (in seconds) used for the first verification pass |
-| `WINDOW_SECONDS` | `3.0` | Sliding window size (in seconds) for the fallback verification pass |
-| `STEP_SECONDS` | `1.5` | Step size (in seconds) between sliding windows |
-| `ASR_MAX_SECONDS` | `10.0` | Max audio duration (in seconds) forwarded to the upstream ASR |
+| `MAX_VERIFY_SECONDS` | `5.0` | Seconds of audio to buffer before starting speaker verification |
+| `VERIFY_WINDOW_SECONDS` | `3.0` | Sliding window size (in seconds) for the fallback verification pass |
+| `VERIFY_STEP_SECONDS` | `1.5` | Step size (in seconds) between sliding windows |
+| `ASR_MAX_SECONDS` | `3.0` | Max audio duration (in seconds) forwarded to the upstream ASR. Keeps TV noise out of transcripts. Increase to 5–10 if your commands are being truncated |
 
 ### Tuning the Threshold
 
-The `THRESHOLD` environment variable controls how strict speaker matching is. Adjust it in `docker-compose.yml` and restart:
+The `VERIFY_THRESHOLD` environment variable controls how strict speaker matching is. Adjust it in `docker-compose.yml` and restart:
 
 | Value | Behavior |
 |-------|----------|
-| `0.30` | **Default** — lenient, good for varied voice volumes and distances |
+| `0.20` | **Default** — lenient, good for noisy environments with TV or background audio |
+| `0.30` | Moderate — good for varied voice volumes and distances |
 | `0.35` | Moderate — slightly stricter, still tolerant of quiet speech |
 | `0.45` | Balanced — good security with consistent mic distance |
 | `0.55` | Strict — fewer false accepts, but may reject you more often |
@@ -200,27 +219,31 @@ docker compose logs -f voice-match
 You'll see output like:
 
 ```
-INFO: Speaker verified (similarity=0.6234, threshold=0.30), forwarding to ASR
-WARNING: Speaker rejected (similarity=0.1847, threshold=0.30)
+INFO [971f8eb8] Speaker verified: jx (similarity=0.3787, threshold=0.20), forwarding to ASR immediately
+WARNING [3a2c1b9f] Speaker rejected in 5032ms (best=0.1847, threshold=0.20, scores={'jx': '0.1847'})
 ```
 
-- **Your voice** will typically score **0.45–0.75**
-- **TV/other speakers** will typically score **0.05–0.25**
+- **Your voice** will typically score **0.25–0.75** depending on conditions
+- **TV/other speakers** will typically score **0.05–0.20**
 - Set the threshold in the gap between these ranges
 - If you're getting rejected when speaking quietly, **lower the threshold** or **re-enroll with more samples** recorded at different volumes and distances
 
 > **Being rejected too often?** The most effective fix is to add more enrollment samples. Record additional samples in the conditions where you're being rejected (e.g., speaking softly, further from the mic, different times of day) and re-run enrollment. More samples produce a more robust voiceprint that handles natural voice variation better.
 
-### Two-Pass Verification
+### Noisy Environment Tuning
 
-Voice Match uses a two-pass strategy to handle background noise (e.g., TV audio that continues after your command):
+The default settings are already tuned for noisy environments (TV, radio, etc.). If you need to adjust further:
 
-1. **First pass:** Only the first 5 seconds of audio are verified. This is where your voice command typically lives, before background noise takes over.
-2. **Fallback pass:** If the first pass fails, a 3-second sliding window scans the full audio in 1.5-second steps. If any window matches an enrolled speaker, the audio is accepted.
+```yaml
+    environment:
+      - MAX_VERIFY_SECONDS=5.0   # Start verification after 5s (don't wait for silence)
+      - ASR_MAX_SECONDS=3.0      # Only send first 3s to ASR (cuts off TV tail)
+      - VERIFY_THRESHOLD=0.20           # Low threshold to account for mixed audio
+```
 
-The full audio is always forwarded to ASR regardless of which window matched, so transcription accuracy is unaffected.
+With these settings, the proxy will verify your identity and transcribe your command within ~5 seconds, regardless of whether the satellite's VAD is still listening because of background noise.
 
-You can tune this behavior with the `MAX_VERIFY_SECONDS`, `WINDOW_SECONDS`, and `STEP_SECONDS` environment variables.
+> **Note:** The satellite may continue showing a "listening" animation after the command has already been processed. This is a cosmetic issue — Home Assistant already has your transcript and is executing the command. The satellite stops listening when its own VAD finally detects silence or times out.
 
 ### Re-enrollment
 
@@ -261,7 +284,7 @@ services:
       - ./wyoming-voice-match/data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - THRESHOLD=0.30
+      - VERIFY_THRESHOLD=0.20
       - DEVICE=cuda
     deploy:
       resources:
@@ -274,30 +297,20 @@ services:
 
 For CPU-only usage, use `docker-compose.cpu.yml` instead, or remove the `deploy` section and set `DEVICE=cpu`.
 
-## Architecture
-
-The service implements the Wyoming ASR protocol (`Transcribe`, `AudioStart`, `AudioChunk`, `AudioStop`, `Transcript`) and presents itself as a standard ASR service to Home Assistant. Internally it:
-
-1. Receives and buffers a complete audio stream
-2. Runs ECAPA-TDNN inference to extract a 192-dimensional speaker embedding
-3. Computes cosine similarity against all enrolled voiceprints
-4. On match (any speaker): opens an async connection to the upstream ASR, replays the buffered audio, and returns the transcript
-5. On rejection: returns an empty `Transcript` event
-
-The ECAPA-TDNN model is loaded once at startup and shared across connections. A lock prevents concurrent inference on the model.
-
 ## Performance
 
-- **Speaker verification latency:** ~30–80ms on GPU, ~200–500ms on CPU
+- **Speaker verification latency:** ~5–25ms on GPU, ~200–500ms on CPU
+- **End-to-end pipeline:** ~5 seconds from wake word to transcript (in noisy environments, vs 15+ seconds without early verification)
 - **Memory usage:** ~500MB (model + PyTorch runtime)
-- **Accuracy:** ECAPA-TDNN achieves 0.69% Equal Error Rate on VoxCeleb1, which is state of the art for open-source speaker verification
+- **Accuracy:** ECAPA-TDNN achieves 0.69% Equal Error Rate on VoxCeleb1, state of the art for open-source speaker verification
 
 ## Limitations
 
-- **Short commands** (under 1–2 seconds) have less audio data, reducing verification accuracy
-- **Voice changes** from illness, whispering, or shouting may lower similarity scores — enroll with varied samples
+- **Short commands** (under 1–2 seconds) produce less audio for verification, reducing accuracy
+- **Voice changes** from illness, whispering, or shouting may lower similarity scores — enroll with varied samples to improve robustness
+- **TV noise in transcripts** can occur if `ASR_MAX_SECONDS` is set too high — the default of 3 seconds works well for most commands. Increase it if longer commands are being truncated
+- **Satellite listening animation** may continue after the command has been processed, since the satellite's VAD doesn't know the proxy already responded
 - **Multiple users** are supported — enroll each person separately and the service accepts audio from any enrolled speaker
-- **Adds latency** since audio must be fully buffered before verification; typically unnoticeable in practice
 
 ## License
 

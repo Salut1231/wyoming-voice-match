@@ -12,15 +12,15 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - THRESHOLD=0.30
+      - VERIFY_THRESHOLD=0.20
       - LISTEN_URI=tcp://0.0.0.0:10350
       - DEVICE=cuda
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
       # - MAX_VERIFY_SECONDS=5.0   # First-pass verification window
-      # - WINDOW_SECONDS=3.0       # Sliding window size for fallback pass
-      # - STEP_SECONDS=1.5         # Sliding window step size
-      # - ASR_MAX_SECONDS=10.0     # Max audio duration forwarded to ASR
+      # - VERIFY_WINDOW_SECONDS=3.0       # Sliding window size for fallback pass
+      # - VERIFY_STEP_SECONDS=1.5         # Sliding window step size
+      # - ASR_MAX_SECONDS=3.0     # Max audio duration forwarded to ASR
     deploy:
       resources:
         reservations:
