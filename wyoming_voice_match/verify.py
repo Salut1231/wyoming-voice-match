@@ -540,9 +540,9 @@ class SpeakerVerifier:
     ) -> Optional[bytes]:
         """Trim a long kept region by scanning with a sliding window.
 
-        Scans from the start to find where the speaker's voice begins,
-        and from the end to find where it ends. Returns only the portion
-        between those boundaries.
+        Scans the entire region with overlapping windows, scores each one,
+        then finds the longest contiguous stretch of matching windows and
+        trims to those boundaries.
 
         Returns None if trimming would produce no audio.
         """
@@ -562,51 +562,53 @@ class SpeakerVerifier:
         if region_len < window_bytes:
             return None
 
-        # Scan forward to find where speaker starts
-        speaker_start_byte = 0
-        found_start = False
+        # Scan entire region and collect all window scores
+        windows = []  # (pos_byte, similarity)
         pos = 0
         while pos + window_bytes <= region_len:
             chunk = region_audio[pos:pos + window_bytes]
             embedding = self._extract_embedding(chunk, sample_rate)
             sim = float(1.0 - cosine(embedding, voiceprint))
+            windows.append((pos, sim))
             chunk_start_sec = region_start_sec + pos / (sample_rate * bytes_per_sample)
             chunk_end_sec = chunk_start_sec + window_seconds
             _LOGGER.debug(
-                "  Trim scan forward %.1f-%.1fs: %.4f %s",
+                "  Trim scan %.1f-%.1fs: %.4f %s",
                 chunk_start_sec, chunk_end_sec, sim,
                 "SPEAKER" if sim >= similarity_threshold else "",
             )
-            if sim >= similarity_threshold:
-                speaker_start_byte = pos
-                found_start = True
-                break
             pos += step_bytes
 
-        if not found_start:
+        if not windows:
             return None
 
-        # Scan backward to find where speaker ends
-        speaker_end_byte = region_len
-        pos = region_len - window_bytes
-        while pos >= speaker_start_byte:
-            chunk = region_audio[pos:pos + window_bytes]
-            if len(chunk) < min_window_bytes:
-                pos -= step_bytes
-                continue
-            embedding = self._extract_embedding(chunk, sample_rate)
-            sim = float(1.0 - cosine(embedding, voiceprint))
-            chunk_start_sec = region_start_sec + pos / (sample_rate * bytes_per_sample)
-            chunk_end_sec = chunk_start_sec + len(chunk) / (sample_rate * bytes_per_sample)
-            _LOGGER.debug(
-                "  Trim scan backward %.1f-%.1fs: %.4f %s",
-                chunk_start_sec, chunk_end_sec, sim,
-                "SPEAKER" if sim >= similarity_threshold else "",
-            )
+        # Find the longest contiguous run of matching windows
+        best_run_start = -1
+        best_run_len = 0
+        current_start = -1
+        current_len = 0
+
+        for i, (_, sim) in enumerate(windows):
             if sim >= similarity_threshold:
-                speaker_end_byte = pos + window_bytes
-                break
-            pos -= step_bytes
+                if current_start == -1:
+                    current_start = i
+                    current_len = 1
+                else:
+                    current_len += 1
+                if current_len > best_run_len:
+                    best_run_start = current_start
+                    best_run_len = current_len
+            else:
+                current_start = -1
+                current_len = 0
+
+        if best_run_start == -1:
+            return None
+
+        # Trim to the boundaries of the best run
+        speaker_start_byte = windows[best_run_start][0]
+        last_window_pos = windows[best_run_start + best_run_len - 1][0]
+        speaker_end_byte = last_window_pos + window_bytes
 
         trimmed = region_audio[speaker_start_byte:speaker_end_byte]
         if len(trimmed) < min_window_bytes:
