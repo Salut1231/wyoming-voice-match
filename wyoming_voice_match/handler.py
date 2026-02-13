@@ -190,12 +190,14 @@ class SpeakerVerifyHandler(AsyncEventHandler):
                 for name, score in result.all_scores.items():
                     _LOGGER.debug("[%s]   %s: %.4f", sid, name, score)
 
-            # Trim audio for ASR. Start from where speech was detected
-            # (skipping leading silence) and take up to asr_max_seconds.
-            # This captures the full voice command while cutting off
-            # trailing background noise (e.g., TV audio).
+            # Trim audio for ASR. Start slightly before where speech was
+            # detected (to catch quiet lead-in syllables) and take up to
+            # asr_max_seconds. This captures the full voice command while
+            # cutting off trailing background noise (e.g., TV audio).
+            ASR_PADDING_SEC = 0.5  # extra audio before speech start
             if result.speech_start_sec is not None:
-                start_byte = int(result.speech_start_sec * bytes_per_second)
+                start_sec = max(0.0, result.speech_start_sec - ASR_PADDING_SEC)
+                start_byte = int(start_sec * bytes_per_second)
             else:
                 start_byte = 0
             end_byte = start_byte + int(self.asr_max_seconds * bytes_per_second)
