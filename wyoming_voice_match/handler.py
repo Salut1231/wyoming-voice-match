@@ -291,36 +291,20 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         result: VerificationResult,
         bytes_per_second: int,
     ) -> bytes:
-        """Trim audio for ASR using speech detection bounds.
+        """Trim audio for ASR.
 
-        Uses speech_start (with padding) as the start point and
-        speech_end + asr_max_seconds as the end point. This allows
-        the command to extend beyond the detected energy peak while
-        still cutting off background noise.
+        Sends the first asr_max_seconds of audio from the buffer.
+        The voice command is always at the start of the buffer (right
+        after the wake word), so this captures it while cutting off
+        trailing background noise from the VAD keeping the stream open.
         """
-        # Start: speech_start - padding (or 0)
-        if result.speech_start_sec is not None:
-            start_sec = max(0.0, result.speech_start_sec - _ASR_PADDING_SEC)
-        else:
-            start_sec = 0.0
-
-        # End: speech_end + asr_max_seconds (or start + asr_max_seconds)
-        if result.speech_end_sec is not None:
-            end_sec = result.speech_end_sec + self.asr_max_seconds
-        else:
-            end_sec = start_sec + self.asr_max_seconds
-
-        start_byte = int(start_sec * bytes_per_second)
-        end_byte = int(end_sec * bytes_per_second)
-
-        trimmed = audio_bytes[start_byte:end_byte]
+        max_bytes = int(self.asr_max_seconds * bytes_per_second)
+        trimmed = audio_bytes[:max_bytes]
         _LOGGER.debug(
-            "[%s] ASR trim: %.1f-%.1fs (speech: %.1f-%.1fs)",
+            "[%s] ASR trim: first %.1fs of %.1fs",
             self._session_id,
-            start_sec,
-            min(end_sec, len(audio_bytes) / bytes_per_second),
-            result.speech_start_sec or 0.0,
-            result.speech_end_sec or 0.0,
+            len(trimmed) / bytes_per_second,
+            len(audio_bytes) / bytes_per_second,
         )
         return trimmed
 
