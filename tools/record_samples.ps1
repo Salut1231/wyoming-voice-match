@@ -19,7 +19,7 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Speaker,
 
-    [int]$Samples = 15,
+    [int]$Samples = 30,
 
     [int]$Duration = 5
 )
@@ -108,7 +108,22 @@ $phrases = @(
     "Turn off the TV in the living room",
     "Set an alarm for seven thirty in the morning",
     "Open the garage door",
-    "Tell me a joke"
+    "Tell me a joke",
+    "How long is my commute to work today",
+    "Play my morning playlist on the bedroom speaker",
+    "Is the back door locked",
+    "Remind me to call the dentist at noon",
+    "What is the humidity outside right now",
+    "Turn on the fan in the office",
+    "Cancel all my alarms for tomorrow",
+    "Start the robot vacuum in the living room",
+    "How many steps have I taken today",
+    "Read me the latest news headlines",
+    "Set the lights to warm white in the dining room",
+    "Is there any rain expected this weekend",
+    "Pause the music for a moment please",
+    "Turn on do not disturb mode",
+    "Show me the front door camera"
 )
 
 # Find existing samples

@@ -46,7 +46,7 @@ Edit `docker-compose.yml` and set your upstream ASR URI and preferences in the `
 ```yaml
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - THRESHOLD=0.45
+      - THRESHOLD=0.30
       - LISTEN_URI=tcp://0.0.0.0:10350
       - DEVICE=cuda
       - HF_HOME=/data/hf_cache
@@ -55,7 +55,7 @@ Edit `docker-compose.yml` and set your upstream ASR URI and preferences in the `
 
 ### 3. Enroll Your Voice
 
-Each speaker gets their own enrollment directory with audio samples. Record 5–10 WAV files per person, 3–10 seconds each, speaking naturally.
+Each speaker gets their own enrollment directory with audio samples. Record at least 30 WAV files per person, 5 seconds each, speaking naturally at varied volumes and distances.
 
 ```bash
 # Create enrollment directory for a speaker (first run creates the folder)
@@ -74,7 +74,7 @@ arecord -l
 
 ```bash
 mkdir -p data/enrollment/john
-for i in $(seq 1 15); do
+for i in $(seq 1 30); do
   echo "Sample $i — speak naturally for 5 seconds..."
   arecord -r 16000 -c 1 -f S16_LE -d 5 "data/enrollment/john/john_$(date +%Y%m%d_%H%M%S).wav"
   sleep 1
@@ -93,7 +93,7 @@ system_profiler SPAudioDataType
 
 ```bash
 mkdir -p data/enrollment/john
-for i in $(seq 1 15); do
+for i in $(seq 1 30); do
   echo "Sample $i — speak naturally for 5 seconds..."
   sox -d -r 16000 -c 1 -b 16 "data/enrollment/john/john_$(date +%Y%m%d_%H%M%S).wav" trim 0 5
   sleep 1
@@ -119,20 +119,10 @@ Alternatively, use any voice recorder app on your phone or computer and save the
 1. "Hey, turn on the living room lights and set them to fifty percent"
 2. "What's the weather going to be like tomorrow morning"
 3. "Set a timer for ten minutes and remind me to check the oven"
-4. "Play some jazz music in the kitchen please"
-5. "Good morning, what's on my calendar for today"
-6. "Lock the front door and turn off all the lights downstairs"
-7. "What's the temperature inside the house right now"
-8. "Turn the thermostat up to seventy two degrees"
-9. "Add milk and eggs to my shopping list"
-10. "Dim the bedroom lights to twenty percent"
-11. "What time is my first meeting tomorrow"
-12. "Turn off the TV in the living room"
-13. "Set an alarm for seven thirty in the morning"
-14. "Open the garage door"
-15. "Tell me a joke"
+4. "Lock the front door and turn off all the lights downstairs"
+5. "What's the temperature inside the house right now"
 
-> **Tip:** Vary your distance from the mic, volume, and phrasing across samples. Record some samples slightly quieter or further away to improve recognition at different volumes. Use your normal everyday voice — the more variety, the more robust your voiceprint will be.
+> **Tip:** We've found the best results come from enrolling with **30 samples** at varied volumes and distances. The Windows recording script (`.\tools\record_samples.ps1`) will prompt you through all 30 with suggested phrases. On Linux/macOS, adjust the loop count as needed. The more variety in your samples, the more robust your voiceprint will be.
 
 Then run enrollment again to generate the voiceprint:
 
@@ -179,7 +169,7 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | Variable | Default | Description |
 |---|---|---|
 | `UPSTREAM_URI` | `tcp://localhost:10300` | Wyoming URI of your real ASR service |
-| `THRESHOLD` | `0.45` | Cosine similarity threshold for speaker verification (0.0–1.0) |
+| `THRESHOLD` | `0.30` | Cosine similarity threshold for speaker verification (0.0–1.0) |
 | `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
 | `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`) |
 | `HF_HOME` | `/data/hf_cache` | HuggingFace cache directory for model downloads (persisted via volume) |
@@ -191,9 +181,9 @@ The `THRESHOLD` environment variable controls how strict speaker matching is. Ad
 
 | Value | Behavior |
 |-------|----------|
-| `0.30` | Very lenient — accepts most speech, may let TV/others through |
-| `0.35` | Lenient — good if you're often rejected when speaking quietly or far from mic |
-| `0.45` | **Default** — balanced between security and convenience |
+| `0.30` | **Default** — lenient, good for varied voice volumes and distances |
+| `0.35` | Moderate — slightly stricter, still tolerant of quiet speech |
+| `0.45` | Balanced — good security with consistent mic distance |
 | `0.55` | Strict — fewer false accepts, but may reject you more often |
 | `0.65` | Very strict — high security, requires close mic and clear speech |
 
@@ -206,14 +196,16 @@ docker compose logs -f voice-match
 You'll see output like:
 
 ```
-INFO: Speaker verified (similarity=0.6234, threshold=0.45), forwarding to ASR
-WARNING: Speaker rejected (similarity=0.1847, threshold=0.45)
+INFO: Speaker verified (similarity=0.6234, threshold=0.30), forwarding to ASR
+WARNING: Speaker rejected (similarity=0.1847, threshold=0.30)
 ```
 
 - **Your voice** will typically score **0.45–0.75**
 - **TV/other speakers** will typically score **0.05–0.25**
 - Set the threshold in the gap between these ranges
 - If you're getting rejected when speaking quietly, **lower the threshold** or **re-enroll with more samples** recorded at different volumes and distances
+
+> **Being rejected too often?** The most effective fix is to add more enrollment samples. Record additional samples in the conditions where you're being rejected (e.g., speaking softly, further from the mic, different times of day) and re-run enrollment. More samples produce a more robust voiceprint that handles natural voice variation better.
 
 ### Re-enrollment
 
@@ -254,7 +246,7 @@ services:
       - ./wyoming-voice-match/data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - THRESHOLD=0.45
+      - THRESHOLD=0.30
       - DEVICE=cuda
     deploy:
       resources:

@@ -1,6 +1,7 @@
 """Speaker verification using SpeechBrain ECAPA-TDNN."""
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -39,7 +40,7 @@ class SpeakerVerifier:
         voiceprints_dir: str,
         model_dir: str = "/data/models",
         device: str = "cuda",
-        threshold: float = 0.45,
+        threshold: float = 0.30,
     ) -> None:
         self.threshold = threshold
         self.device = device
@@ -104,7 +105,11 @@ class SpeakerVerifier:
                 threshold=self.threshold,
             )
 
+        start_time = time.monotonic()
+
         embedding = self._extract_embedding(audio_bytes, sample_rate)
+
+        embed_time = time.monotonic()
 
         # Compare against all enrolled voiceprints
         all_scores: Dict[str, float] = {}
@@ -120,6 +125,15 @@ class SpeakerVerifier:
                 best_speaker = speaker_name
 
         is_match = best_score >= self.threshold
+
+        total_time = time.monotonic() - start_time
+        embed_elapsed = embed_time - start_time
+        _LOGGER.debug(
+            "Verification took %.0fms (embedding: %.0fms, comparison: %.0fms)",
+            total_time * 1000,
+            embed_elapsed * 1000,
+            (total_time - embed_elapsed) * 1000,
+        )
 
         return VerificationResult(
             is_match=is_match,
