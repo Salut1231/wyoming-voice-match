@@ -6,8 +6,6 @@ import time
 import uuid
 from typing import Optional
 
-import numpy as np
-
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.client import AsyncClient
@@ -22,17 +20,14 @@ _LOGGER = logging.getLogger(__name__)
 # Lock to prevent concurrent model inference
 _MODEL_LOCK = asyncio.Lock()
 
-# Extra audio before detected speech start to capture quiet lead-in syllables
-_ASR_PADDING_SEC = 0.5
-
 
 class SpeakerVerifyHandler(AsyncEventHandler):
     """Wyoming ASR handler that gates transcription on speaker identity.
 
-    Runs speaker verification early (as soon as enough audio is buffered)
-    and immediately forwards to ASR without waiting for AudioStop. This
-    bypasses the upstream VAD latency when background noise keeps the
-    stream open.
+    Runs speaker verification early (as soon as enough audio is buffered).
+    Once verified, waits for the full audio stream, then uses voiceprint-based
+    speaker extraction to isolate the enrolled speaker's voice from background
+    noise (TV, radio, other people) before forwarding to ASR.
     """
 
     def __init__(
@@ -40,7 +35,6 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         wyoming_info: Info,
         verifier: SpeakerVerifier,
         upstream_uri: str,
-        asr_max_seconds: float = 8.0,
         *args,
         **kwargs,
     ) -> None:
@@ -49,7 +43,6 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         self.wyoming_info = wyoming_info
         self.verifier = verifier
         self.upstream_uri = upstream_uri
-        self.asr_max_seconds = asr_max_seconds
 
         # Per-connection state
         self._audio_buffer = bytes()
@@ -62,6 +55,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         self._responded: bool = False
         self._stream_start_time: Optional[float] = None
         self._session_id: str = uuid.uuid4().hex[:8]
+        self._audio_stopped = asyncio.Event()
 
     async def handle_event(self, event: Event) -> bool:
         """Process a single Wyoming event."""
@@ -84,16 +78,13 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             self._verify_task = None
             self._verify_started = False
             self._responded = False
+            self._audio_stopped = asyncio.Event()
             self._stream_start_time = time.monotonic()
             _LOGGER.debug("[%s] ── New audio session started ──", sid)
             return True
 
         # Audio data — accumulate and trigger early verification + ASR
         if AudioChunk.is_type(event.type):
-            # If we already responded, just consume remaining chunks
-            if self._responded:
-                return True
-
             chunk = AudioChunk.from_event(event)
             self._audio_rate = chunk.rate
             self._audio_width = chunk.width
@@ -101,7 +92,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             self._audio_buffer += chunk.audio
 
             # Trigger verification once we have enough audio
-            if not self._verify_started:
+            if not self._verify_started and not self._responded:
                 bytes_per_second = (
                     self._audio_rate * self._audio_width * self._audio_channels
                 )
@@ -123,6 +114,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
 
         # Audio stream end — respond if we haven't already
         if AudioStop.is_type(event.type):
+            self._audio_stopped.set()
             if self._responded:
                 # Already sent response during streaming
                 elapsed = self._elapsed_ms()
@@ -171,88 +163,54 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             for name, score in result.all_scores.items():
                 _LOGGER.debug("[%s]   %s: %.4f", sid, name, score)
 
-        # Use the live buffer (not the verification snapshot). After
-        # verification passes, wait for the user to stop speaking before
-        # forwarding. We detect this by monitoring the RMS energy of the
-        # most recent audio — when it drops below the speech level, the
-        # user has finished and only background noise (or silence) remains.
+        # Mark as responded immediately so AudioStop handler doesn't
+        # trigger _process_audio_sync while we're waiting for the command
+        self._responded = True
+
         bytes_per_second = (
             self._audio_rate * self._audio_width * self._audio_channels
         )
-        target_bytes = int(self.asr_max_seconds * bytes_per_second)
 
-        # Get the speech peak energy from verification to calibrate
-        # what "user stopped speaking" looks like
-        speech_peak = self._get_speech_peak(result, bytes_per_second)
+        # Wait until the satellite sends AudioStop (stream fully ended).
+        # This ensures we capture the entire command regardless of length.
+        # Cap at 30s as absolute safety.
+        _LOGGER.debug("[%s] Waiting for AudioStop", sid)
+        try:
+            await asyncio.wait_for(self._audio_stopped.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            _LOGGER.debug("[%s] AudioStop timeout (30s)", sid)
 
-        if speech_peak and len(self._audio_buffer) < target_bytes:
-            # Speech was detected — wait for the user to finish speaking
-            # "Finished" = recent audio energy dropped well below speech peak
-            stop_threshold = speech_peak * 0.10  # 10% of speech peak
-            check_window = int(0.5 * bytes_per_second)  # check last 500ms
-            min_quiet_checks = 3  # need 3 consecutive quiet checks (300ms)
-            quiet_count = 0
+        buffer_duration = len(self._audio_buffer) / bytes_per_second
+        _LOGGER.debug("[%s] Stream ended: %.1fs buffer", sid, buffer_duration)
 
-            wait_needed = (target_bytes - len(self._audio_buffer)) / bytes_per_second
+        # Extract only the verified speaker's audio segments using
+        # voiceprint comparison. This removes TV/radio/other speakers
+        # by keeping only segments that match the enrolled voice.
+        full_buffer = bytes(self._audio_buffer)
+
+        speaker_name = result.matched_speaker
+        if speaker_name:
             _LOGGER.debug(
-                "[%s] Waiting up to %.1fs for speech to end "
-                "(peak=%.0f, stop_threshold=%.0f)",
-                sid, wait_needed, speech_peak, stop_threshold,
+                "[%s] Extracting speaker '%s' audio from %.1fs buffer",
+                sid, speaker_name, buffer_duration,
             )
-            poll_interval = 0.1
-            waited = 0.0
-
-            while len(self._audio_buffer) < target_bytes and waited < wait_needed:
-                await asyncio.sleep(poll_interval)
-                waited += poll_interval
-
-                # Check if recent audio has gone quiet
-                if len(self._audio_buffer) >= check_window:
-                    tail = self._audio_buffer[-check_window:]
-                    tail_samples = np.frombuffer(tail, dtype=np.int16).astype(np.float32)
-                    tail_rms = float(np.sqrt(np.mean(tail_samples ** 2)))
-
-                    if tail_rms < stop_threshold:
-                        quiet_count += 1
-                        if quiet_count >= min_quiet_checks:
-                            _LOGGER.debug(
-                                "[%s] Speech ended (tail RMS=%.0f < %.0f), "
-                                "forwarding after %.1fs wait",
-                                sid, tail_rms, stop_threshold, waited,
-                            )
-                            break
-                    else:
-                        quiet_count = 0  # reset — still speaking or loud TV
-
-            if waited >= wait_needed:
-                _LOGGER.debug(
-                    "[%s] Buffer reached %.1fs limit after %.1fs wait",
-                    sid, self.asr_max_seconds, waited,
+            async with _MODEL_LOCK:
+                loop = asyncio.get_running_loop()
+                forward_audio = await loop.run_in_executor(
+                    None,
+                    self.verifier.extract_speaker_audio,
+                    full_buffer,
+                    speaker_name,
+                    self._audio_rate,
                 )
-        elif len(self._audio_buffer) < target_bytes:
-            # No speech peak detected — just wait for buffer to fill
-            wait_needed = (target_bytes - len(self._audio_buffer)) / bytes_per_second
-            _LOGGER.debug(
-                "[%s] No speech peak, waiting up to %.1fs for buffer",
-                sid, wait_needed,
-            )
-            poll_interval = 0.1
-            waited = 0.0
-            while len(self._audio_buffer) < target_bytes and waited < wait_needed:
-                await asyncio.sleep(poll_interval)
-                waited += poll_interval
+        else:
+            forward_audio = full_buffer
 
-        forward_audio = bytes(self._audio_buffer)
-        asr_audio = self._trim_for_asr(forward_audio, result, bytes_per_second)
-        audio_duration = len(forward_audio) / bytes_per_second
-        asr_duration = len(asr_audio) / bytes_per_second
-        _LOGGER.debug(
-            "[%s] Forwarding %.1fs (trimmed from %.1fs) to ASR",
-            sid, asr_duration, audio_duration,
-        )
+        asr_duration = len(forward_audio) / bytes_per_second
+        _LOGGER.debug("[%s] Forwarding %.1fs to ASR", sid, asr_duration)
 
         # Forward to ASR and respond immediately
-        transcript = await self._forward_to_upstream(asr_audio)
+        transcript = await self._forward_to_upstream(forward_audio)
         await self.write_event(Transcript(text=transcript).event())
         self._responded = True
 
@@ -327,15 +285,13 @@ class SpeakerVerifyHandler(AsyncEventHandler):
                 for name, score in result.all_scores.items():
                     _LOGGER.debug("[%s]   %s: %.4f", sid, name, score)
 
-            # Trim audio for ASR
-            asr_audio = self._trim_for_asr(audio_bytes, result, bytes_per_second)
-            asr_duration = len(asr_audio) / bytes_per_second
+            # Forward full buffer to ASR (AudioStop path = quiet room, no trimming needed)
             _LOGGER.debug(
-                "[%s] Forwarding %.1fs (trimmed from %.1fs) to ASR",
-                sid, asr_duration, audio_duration,
+                "[%s] Forwarding %.1fs to ASR",
+                sid, audio_duration,
             )
 
-            transcript = await self._forward_to_upstream(asr_audio)
+            transcript = await self._forward_to_upstream(audio_bytes)
             await self.write_event(Transcript(text=transcript).event())
             self._responded = True
             total_elapsed = self._elapsed_ms()
@@ -352,86 +308,6 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             )
             await self.write_event(Transcript(text="").event())
             self._responded = True
-
-    def _get_speech_peak(
-        self,
-        result: VerificationResult,
-        bytes_per_second: int,
-    ) -> Optional[float]:
-        """Get the peak RMS energy of the detected speech segment.
-
-        Used to calibrate "end of speech" detection — when recent audio
-        drops well below this level, the user has stopped talking.
-        Returns None if no speech segment was detected.
-        """
-        if result.speech_audio is None:
-            return None
-
-        samples = np.frombuffer(result.speech_audio, dtype=np.int16).astype(np.float32)
-        if len(samples) == 0:
-            return None
-
-        # Compute RMS in 50ms frames and return the peak
-        frame_size = int(self._audio_rate * 0.05)
-        num_frames = len(samples) // frame_size
-        if num_frames == 0:
-            return float(np.sqrt(np.mean(samples ** 2)))
-
-        frames = samples[:num_frames * frame_size].reshape(num_frames, frame_size)
-        rms = np.sqrt(np.mean(frames ** 2, axis=1))
-        return float(np.max(rms))
-
-    # RMS energy above this level in the tail indicates background noise (TV, radio)
-    _NOISE_FLOOR_RMS = 500.0
-    # How many seconds of the tail to sample for noise detection
-    _NOISE_TAIL_SECONDS = 1.0
-
-    def _trim_for_asr(
-        self,
-        audio_bytes: bytes,
-        result: VerificationResult,
-        bytes_per_second: int,
-    ) -> bytes:
-        """Trim audio for ASR, but only if background noise is detected.
-
-        Checks the RMS energy of the last second of audio. If it's
-        near-silence, sends the full buffer (no trimming needed). If
-        there's sustained energy (TV, radio), trims to asr_max_seconds
-        to cut off the noise tail.
-        """
-        max_bytes = int(self.asr_max_seconds * bytes_per_second)
-        audio_duration = len(audio_bytes) / bytes_per_second
-
-        # If buffer is shorter than the cap, no trimming needed regardless
-        if len(audio_bytes) <= max_bytes:
-            _LOGGER.debug(
-                "[%s] ASR trim: buffer (%.1fs) within limit (%.1fs), sending all",
-                self._session_id, audio_duration, self.asr_max_seconds,
-            )
-            return audio_bytes
-
-        # Check the tail of the buffer for background noise
-        tail_bytes = int(self._NOISE_TAIL_SECONDS * bytes_per_second)
-        tail = audio_bytes[-tail_bytes:]
-        tail_samples = np.frombuffer(tail, dtype=np.int16).astype(np.float32)
-        tail_rms = float(np.sqrt(np.mean(tail_samples ** 2)))
-
-        if tail_rms < self._NOISE_FLOOR_RMS:
-            # Tail is quiet — no background noise, send full buffer
-            _LOGGER.debug(
-                "[%s] ASR trim: tail RMS=%.0f (quiet), sending full %.1fs",
-                self._session_id, tail_rms, audio_duration,
-            )
-            return audio_bytes
-        else:
-            # Tail has sustained energy — background noise, trim
-            trimmed = audio_bytes[:max_bytes]
-            _LOGGER.debug(
-                "[%s] ASR trim: tail RMS=%.0f (noisy), trimming to %.1fs of %.1fs",
-                self._session_id, tail_rms,
-                len(trimmed) / bytes_per_second, audio_duration,
-            )
-            return trimmed
 
     def _elapsed_ms(self) -> float:
         """Milliseconds since stream start."""

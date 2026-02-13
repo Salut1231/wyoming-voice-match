@@ -67,25 +67,19 @@ def get_args() -> argparse.Namespace:
         "--max-verify-seconds",
         type=float,
         default=float(os.environ.get("MAX_VERIFY_SECONDS", "5.0")),
-        help="Max audio duration (seconds) for first-pass verification (default: 8.0)",
+        help="Max audio duration (seconds) for first-pass verification (default: 5.0)",
     )
     parser.add_argument(
         "--window-seconds",
         type=float,
         default=float(os.environ.get("VERIFY_WINDOW_SECONDS", "3.0")),
-        help="Sliding window size in seconds for fallback verification (default: 8.0)",
+        help="Sliding window size in seconds for fallback verification (default: 3.0)",
     )
     parser.add_argument(
         "--step-seconds",
         type=float,
         default=float(os.environ.get("VERIFY_STEP_SECONDS", "1.5")),
         help="Sliding window step in seconds (default: 1.5)",
-    )
-    parser.add_argument(
-        "--asr-max-seconds",
-        type=float,
-        default=float(os.environ.get("ASR_MAX_SECONDS", "8.0")),
-        help="Max audio duration (seconds) forwarded to upstream ASR (default: 8.0)",
     )
 
     return parser.parse_args()
@@ -187,7 +181,6 @@ async def main() -> None:
             wyoming_info,
             verifier,
             args.upstream_uri,
-            args.asr_max_seconds,
         )
     )
 

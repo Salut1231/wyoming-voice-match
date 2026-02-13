@@ -363,6 +363,146 @@ class SpeakerVerifier:
             all_scores=all_scores,
         )
 
+    def extract_speaker_audio(
+        self,
+        audio_bytes: bytes,
+        speaker_name: str,
+        sample_rate: int = 16000,
+        similarity_threshold: Optional[float] = None,
+    ) -> bytes:
+        """Extract only the segments spoken by the given speaker.
+
+        Uses a two-stage approach:
+        1. Energy analysis to find speech regions (high-energy frames)
+        2. Speaker verification on each speech region to keep only
+           the enrolled speaker's voice
+
+        Args:
+            audio_bytes: Raw 16-bit PCM audio
+            speaker_name: Name of the enrolled speaker to extract
+            sample_rate: Audio sample rate in Hz
+            similarity_threshold: Min similarity to keep a region.
+                                  Defaults to self.threshold * 0.5
+
+        Returns:
+            Concatenated PCM audio containing only the speaker's segments
+        """
+        if speaker_name not in self.voiceprints:
+            _LOGGER.warning("Speaker %s not enrolled, returning full audio", speaker_name)
+            return audio_bytes
+
+        voiceprint = self.voiceprints[speaker_name]
+        if similarity_threshold is None:
+            similarity_threshold = self.threshold * 0.5
+
+        start_time = time.monotonic()
+
+        # Stage 1: Find speech regions using energy analysis
+        audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+        frame_ms = 50  # 50ms frames for energy analysis
+        frame_size = int(sample_rate * frame_ms / 1000)
+        num_frames = len(audio_np) // frame_size
+
+        if num_frames == 0:
+            return audio_bytes
+
+        frames = audio_np[:num_frames * frame_size].reshape(num_frames, frame_size)
+        frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+
+        # Determine energy threshold: use 10th percentile * 5 as speech indicator.
+        # The 10th percentile captures the quietest frames (silence/pauses),
+        # giving the true noise floor even when TV fills most of the buffer.
+        noise_floor = float(np.percentile(frame_rms, 10))
+        energy_threshold = max(noise_floor * 5.0, 500.0)
+
+        # Find contiguous speech regions (groups of high-energy frames)
+        is_speech = frame_rms >= energy_threshold
+        regions: List[tuple] = []  # (start_frame, end_frame)
+        in_region = False
+        region_start = 0
+
+        for i in range(num_frames):
+            if is_speech[i] and not in_region:
+                region_start = i
+                in_region = True
+            elif not is_speech[i] and in_region:
+                # Allow small gaps (up to 300ms) within speech
+                gap_frames = int(0.3 * 1000 / frame_ms)
+                if i + gap_frames < num_frames and np.any(is_speech[i:i + gap_frames]):
+                    continue  # Skip small gap
+                regions.append((region_start, i))
+                in_region = False
+
+        if in_region:
+            regions.append((region_start, num_frames))
+
+        if not regions:
+            _LOGGER.debug(
+                "No speech regions found (noise_floor=%.0f, threshold=%.0f)",
+                noise_floor, energy_threshold,
+            )
+            return audio_bytes
+
+        _LOGGER.debug(
+            "Found %d speech regions (noise_floor=%.0f, threshold=%.0f): %s",
+            len(regions), noise_floor, energy_threshold,
+            ", ".join(
+                f"{s * frame_ms / 1000:.1f}-{e * frame_ms / 1000:.1f}s"
+                for s, e in regions
+            ),
+        )
+
+        # Stage 2: Verify each speech region against the speaker's voiceprint
+        bytes_per_sample = 2
+        kept_regions = []
+        region_scores = []
+
+        for start_frame, end_frame in regions:
+            # Ensure minimum 1s for reliable embedding
+            duration_frames = end_frame - start_frame
+            min_frames = int(1.0 * 1000 / frame_ms)  # 1s minimum
+            if duration_frames < min_frames:
+                # Expand region symmetrically to reach 1s
+                expand = (min_frames - duration_frames) // 2
+                start_frame = max(0, start_frame - expand)
+                end_frame = min(num_frames, end_frame + expand)
+
+            start_byte = start_frame * frame_size * bytes_per_sample
+            end_byte = end_frame * frame_size * bytes_per_sample
+            region_audio = audio_bytes[start_byte:end_byte]
+
+            embedding = self._extract_embedding(region_audio, sample_rate)
+            similarity = float(1.0 - cosine(embedding, voiceprint))
+            region_scores.append((start_frame, end_frame, similarity))
+
+            if similarity >= similarity_threshold:
+                kept_regions.append(region_audio)
+
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+
+        _LOGGER.debug(
+            "Speaker extraction: %d/%d regions kept for '%s' in %.0fms "
+            "(threshold=%.2f)",
+            len(kept_regions), len(regions), speaker_name,
+            elapsed_ms, similarity_threshold,
+        )
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            scores_str = " ".join(
+                f"{s * frame_ms / 1000:.1f}-{e * frame_ms / 1000:.1f}s="
+                f"{'KEEP' if sim >= similarity_threshold else 'drop'}({sim:.2f})"
+                for s, e, sim in region_scores
+            )
+            _LOGGER.debug("Region scores: %s", scores_str)
+
+        if not kept_regions:
+            _LOGGER.warning(
+                "No regions matched speaker '%s', returning full audio",
+                speaker_name,
+            )
+            return audio_bytes
+
+        return b"".join(kept_regions)
+
     def extract_embedding(self, audio_bytes: bytes, sample_rate: int = 16000) -> np.ndarray:
         """Extract a speaker embedding from audio. Public API for enrollment."""
         return self._extract_embedding(audio_bytes, sample_rate)

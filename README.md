@@ -1,6 +1,6 @@
 # Wyoming Voice Match
 
-A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifies speaker identity and isolates voice commands from background noise before forwarding audio to a downstream speech-to-text service. Designed for [Home Assistant](https://www.home-assistant.io/) voice pipelines to prevent false activations from TVs, radios, and other people — and to deliver clean transcripts even in noisy environments.
+A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifies speaker identity and extracts your voice from background noise before forwarding audio to a downstream speech-to-text service. Designed for [Home Assistant](https://www.home-assistant.io/) voice pipelines to prevent false activations from TVs, radios, and other people — and to deliver clean transcripts even in noisy environments.
 
 ## The Problem
 
@@ -9,7 +9,7 @@ Home Assistant voice satellites listen for a wake word, then stream audio to a s
 1. **False activations**: The TV says something that triggers a command
 2. **Noisy transcripts**: Your voice command gets mixed with TV dialogue, producing garbage like *"What time is it? People look at you like some kind of service freak"*
 
-Wyoming Voice Match solves both: it verifies that the audio contains **your voice** before allowing it through, and it trims the audio buffer so only your command — not the TV — reaches the speech-to-text service.
+Wyoming Voice Match solves both: it verifies that the audio contains **your voice** before allowing it through, and it uses voiceprint-based speaker extraction to isolate your command — removing TV dialogue and other speakers — before sending clean audio to the speech-to-text service.
 
 ## How It Works
 
@@ -20,27 +20,27 @@ Wyoming Voice Match sits between Home Assistant and your ASR (speech-to-text) se
 │   Mic    │────▶│  Wake Word      │────▶│  Wyoming Voice Match  │────▶│ ASR Service  │
 │ (Device) │     │  Detection      │     │                       │     │ (Transcribe) │
 └──────────┘     └─────────────────┘     │  1. Buffer audio      │     └──────────────┘
-                                         │  2. Detect speech     │
-                                         │  3. Verify speaker    │
-                                         │  4. Trim & forward    │
-                                         │     or reject         │
+                                         │  2. Verify speaker    │
+                                         │  3. Wait for stream   │
+                                         │  4. Extract speaker   │
+                                         │  5. Forward to ASR    │
                                          └───────────────────────┘
 ```
 
 ### Step by step
 
 1. **Buffer audio** — audio streams in from Home Assistant after the wake word is detected
-2. **Detect speech** — an energy analysis isolates the loudest segment of audio (your voice near the mic), separating it from background noise like a TV
-3. **Verify speaker** — the speech segment is compared against your enrolled voiceprint using an [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) neural network. If it doesn't match any enrolled speaker, the pipeline is silently stopped with an empty transcript
-4. **Forward to ASR** — once verified, the first few seconds of audio are forwarded to your speech-to-text service, trimming off any trailing background noise
-5. **Respond immediately** — the transcript is returned to Home Assistant without waiting for the audio stream to end, bypassing VAD delays caused by background noise
+2. **Verify speaker** — after 5 seconds, an energy analysis isolates the loudest segment (your voice near the mic) and compares it against your enrolled voiceprint using an [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) neural network. If it doesn't match any enrolled speaker, the pipeline is silently stopped with an empty transcript
+3. **Wait for stream** — once verified, the proxy continues buffering audio until the satellite's VAD signals the end of the stream, capturing your complete command regardless of length
+4. **Extract speaker** — the full audio buffer is split into speech regions using energy analysis, then each region is verified against your voiceprint. Only regions matching your voice are kept; TV dialogue and other speakers are discarded
+5. **Forward to ASR** — the cleaned audio (only your voice) is sent to the speech-to-text service for transcription
 
 **The result:**
 
 - In a quiet room, Voice Match adds only milliseconds of overhead to your existing pipeline — verification is nearly instant
-- With a TV blaring, the VAD can't detect silence and keeps the stream open for 15+ seconds. Voice Match bypasses this by starting verification at 5 seconds and responding immediately, cutting response time to ~5 seconds
-- TV audio and other speakers get rejected with low similarity scores
-- Your voice commands get clean transcripts without TV dialogue mixed in
+- With a TV blaring, speaker extraction removes TV dialogue from the audio, delivering clean transcripts like *"What time is it?"* instead of *"What time is it? So I've been all for it and just..."*
+- Commands of any length are fully captured — no fixed time limits
+- TV audio and other speakers are rejected based on voiceprint mismatch, not energy levels
 
 ## Requirements
 
@@ -213,7 +213,6 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | `MAX_VERIFY_SECONDS` | `5.0` | Seconds of audio to buffer before starting speaker verification |
 | `VERIFY_WINDOW_SECONDS` | `3.0` | Sliding window size (in seconds) for the fallback verification pass |
 | `VERIFY_STEP_SECONDS` | `1.5` | Step size (in seconds) between sliding windows |
-| `ASR_MAX_SECONDS` | `8.0` | Max seconds of audio buffered before forwarding to ASR after verification passes. Lower for faster response, raise for longer commands |
 
 ### Tuning the Threshold
 
@@ -250,18 +249,17 @@ WARNING [3a2c1b9f] Speaker rejected in 5032ms (best=0.1847, threshold=0.20, scor
 
 ### Noisy Environment Tuning
 
-The default settings are already tuned for noisy environments (TV, radio, etc.). If you need to adjust further:
+The default settings are already tuned for noisy environments (TV, radio, etc.). The speaker extraction automatically removes background audio by comparing each speech region against your voiceprint — only regions matching your voice are forwarded to ASR.
+
+If you need to adjust further:
 
 ```yaml
     environment:
-      - MAX_VERIFY_SECONDS=5.0   # Start verification after 5s (don't wait for silence)
-      - ASR_MAX_SECONDS=8.0      # Wait up to 8s of audio before forwarding to ASR
-      - VERIFY_THRESHOLD=0.20           # Low threshold to account for mixed audio
+      - MAX_VERIFY_SECONDS=5.0   # Start verification after 5s
+      - VERIFY_THRESHOLD=0.20    # Low threshold to account for mixed audio
 ```
 
-With these settings, the proxy will verify your identity and transcribe your command within ~5 seconds, regardless of whether the satellite's VAD is still listening because of background noise.
-
-> **Note:** The satellite may continue showing a "listening" animation after the command has already been processed. This is a cosmetic issue — Home Assistant already has your transcript and is executing the command. The satellite stops listening when its own VAD finally detects silence or times out.
+> **Note:** The satellite may continue showing a "listening" animation after the command has been processed. This is cosmetic — the proxy waits for the full stream to capture your complete command, but Home Assistant will have the transcript as soon as extraction and ASR finish.
 
 ### Re-enrollment
 
@@ -305,7 +303,8 @@ For CPU-only usage, replace the image tag with `jxlarrea/wyoming-voice-match:cpu
 ## Performance
 
 - **Speaker verification latency:** ~5–25ms on GPU, ~200–500ms on CPU
-- **End-to-end pipeline:** ~5 seconds from wake word to transcript (in noisy environments, vs 15+ seconds without early verification)
+- **Speaker extraction:** ~15–35ms on GPU for a typical 10–15s buffer
+- **End-to-end pipeline:** Waits for the full audio stream, then verifies and extracts your voice. Total time depends on how long the satellite streams (typically 8–15 seconds with background noise)
 - **Memory usage:** ~500MB (model + PyTorch runtime)
 - **Accuracy:** ECAPA-TDNN achieves 0.69% Equal Error Rate on VoxCeleb1, state of the art for open-source speaker verification
 
@@ -313,7 +312,6 @@ For CPU-only usage, replace the image tag with `jxlarrea/wyoming-voice-match:cpu
 
 - **Short commands** (under 1–2 seconds) produce less audio for verification, reducing accuracy
 - **Voice changes** from illness, whispering, or shouting may lower similarity scores — enroll with varied samples to improve robustness
-- **TV noise in transcripts** can occur if `ASR_MAX_SECONDS` is set too high — the default of 8 seconds works well for most commands. Increase it if longer commands are being truncated
 - **Satellite listening animation** may continue after the command has been processed, since the satellite's VAD doesn't know the proxy already responded
 - **Multiple users** are supported — enroll each person separately and the service accepts audio from any enrolled speaker
 
