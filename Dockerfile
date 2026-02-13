@@ -15,9 +15,17 @@ RUN pip install --no-cache-dir \
     pip install --no-cache-dir -r requirements.txt && \
     # Uninstall triton (~600MB, not needed for inference)
     pip uninstall -y triton 2>/dev/null; \
-    # Remove nvidia CUDA pip packages - runtime base provides these (including cuDNN 9), except cusparselt
-    find /usr/local/lib/python3.10/dist-packages/nvidia -mindepth 1 -maxdepth 1 -type d \
-        ! -name "cusparselt*" ! -name "__pycache__" -exec rm -rf {} + && \
+    # Remove nvidia pip packages that duplicate libs in the CUDA 12.4 runtime base
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cublas && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cuda_runtime && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cuda_nvrtc && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cudnn && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cufft && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/curand && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cusolver && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/cusparse && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/nccl && \
+    rm -rf /usr/local/lib/python3.10/dist-packages/nvidia/nvjitlink && \
     # Strip PyTorch
     find /usr/local/lib/python3.10/dist-packages/torch -name "*.a" -delete && \
     find /usr/local/lib/python3.10/dist-packages/torch -name "test" -type d -exec rm -rf {} + 2>/dev/null; \
