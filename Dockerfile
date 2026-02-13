@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS builder
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir \
     pip install --no-cache-dir -r requirements.txt && \
     # Uninstall triton (~600MB, not needed for inference)
     pip uninstall -y triton 2>/dev/null; \
-    # Remove nvidia CUDA pip packages - runtime base provides these, except cusparselt
+    # Remove nvidia CUDA pip packages - runtime base provides these (including cuDNN 9), except cusparselt
     find /usr/local/lib/python3.10/dist-packages/nvidia -mindepth 1 -maxdepth 1 -type d \
         ! -name "cusparselt*" ! -name "__pycache__" -exec rm -rf {} + && \
     # Strip PyTorch
@@ -43,7 +43,7 @@ RUN pip install --no-cache-dir \
     echo "Cleanup complete"
 
 # --- Runtime stage ---
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 LABEL maintainer="Wyoming Voice Match"
 LABEL description="Wyoming ASR proxy with ECAPA-TDNN speaker verification"
