@@ -43,8 +43,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=float(os.environ.get("THRESHOLD", "0.45")),
-        help="Cosine similarity threshold for verification (default: 0.45)",
+        default=float(os.environ.get("THRESHOLD", "0.30")),
+        help="Cosine similarity threshold for verification (default: 0.30)",
     )
     parser.add_argument(
         "--device",
@@ -62,6 +62,24 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         default=os.environ.get("LOG_LEVEL", "INFO").upper() == "DEBUG",
         help="Enable debug logging",
+    )
+    parser.add_argument(
+        "--max-verify-seconds",
+        type=float,
+        default=float(os.environ.get("MAX_VERIFY_SECONDS", "5.0")),
+        help="Max audio duration (seconds) for first-pass verification (default: 5.0)",
+    )
+    parser.add_argument(
+        "--window-seconds",
+        type=float,
+        default=float(os.environ.get("WINDOW_SECONDS", "3.0")),
+        help="Sliding window size in seconds for fallback verification (default: 3.0)",
+    )
+    parser.add_argument(
+        "--step-seconds",
+        type=float,
+        default=float(os.environ.get("STEP_SECONDS", "1.5")),
+        help="Sliding window step in seconds (default: 1.5)",
     )
 
     return parser.parse_args()
@@ -95,6 +113,9 @@ async def main() -> None:
         model_dir=args.model_dir,
         device=args.device,
         threshold=args.threshold,
+        max_verify_seconds=args.max_verify_seconds,
+        window_seconds=args.window_seconds,
+        step_seconds=args.step_seconds,
     )
 
     if not verifier.voiceprints:
@@ -107,10 +128,15 @@ async def main() -> None:
         sys.exit(1)
 
     _LOGGER.info(
-        "Speaker verifier ready — %d speaker(s) enrolled (threshold=%.2f, device=%s)",
+        "Speaker verifier ready — %d speaker(s) enrolled "
+        "(threshold=%.2f, device=%s, verify_window=%.1fs, "
+        "sliding_window=%.1fs/%.1fs)",
         len(verifier.voiceprints),
         args.threshold,
         args.device,
+        args.max_verify_seconds,
+        args.window_seconds,
+        args.step_seconds,
     )
 
     # Build Wyoming service info

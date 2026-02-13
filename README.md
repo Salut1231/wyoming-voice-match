@@ -174,6 +174,9 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`) |
 | `HF_HOME` | `/data/hf_cache` | HuggingFace cache directory for model downloads (persisted via volume) |
 | `LOG_LEVEL` | `DEBUG` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `MAX_VERIFY_SECONDS` | `5.0` | Duration of audio (in seconds) used for the first verification pass |
+| `WINDOW_SECONDS` | `3.0` | Sliding window size (in seconds) for the fallback verification pass |
+| `STEP_SECONDS` | `1.5` | Step size (in seconds) between sliding windows |
 
 ### Tuning the Threshold
 
@@ -206,6 +209,17 @@ WARNING: Speaker rejected (similarity=0.1847, threshold=0.30)
 - If you're getting rejected when speaking quietly, **lower the threshold** or **re-enroll with more samples** recorded at different volumes and distances
 
 > **Being rejected too often?** The most effective fix is to add more enrollment samples. Record additional samples in the conditions where you're being rejected (e.g., speaking softly, further from the mic, different times of day) and re-run enrollment. More samples produce a more robust voiceprint that handles natural voice variation better.
+
+### Two-Pass Verification
+
+Voice Match uses a two-pass strategy to handle background noise (e.g., TV audio that continues after your command):
+
+1. **First pass:** Only the first 5 seconds of audio are verified. This is where your voice command typically lives, before background noise takes over.
+2. **Fallback pass:** If the first pass fails, a 3-second sliding window scans the full audio in 1.5-second steps. If any window matches an enrolled speaker, the audio is accepted.
+
+The full audio is always forwarded to ASR regardless of which window matched, so transcription accuracy is unaffected.
+
+You can tune this behavior with the `MAX_VERIFY_SECONDS`, `WINDOW_SECONDS`, and `STEP_SECONDS` environment variables.
 
 ### Re-enrollment
 

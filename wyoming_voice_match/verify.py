@@ -41,9 +41,15 @@ class SpeakerVerifier:
         model_dir: str = "/data/models",
         device: str = "cuda",
         threshold: float = 0.30,
+        max_verify_seconds: float = 5.0,
+        window_seconds: float = 3.0,
+        step_seconds: float = 1.5,
     ) -> None:
         self.threshold = threshold
         self.device = device
+        self.max_verify_seconds = max_verify_seconds
+        self.window_seconds = window_seconds
+        self.step_seconds = step_seconds
 
         # Load the pretrained ECAPA-TDNN model
         run_opts = {"device": device} if device == "cuda" else {}
@@ -89,6 +95,14 @@ class SpeakerVerifier:
     def verify(self, audio_bytes: bytes, sample_rate: int = 16000) -> VerificationResult:
         """Verify if audio matches any enrolled speaker.
 
+        Uses a two-pass strategy:
+        1. First pass: verify only the first MAX_VERIFY_SECONDS of audio
+           (where the speaker's voice is most likely to be).
+        2. Fallback: if rejected, try a sliding window across the full audio
+           to find any segment that matches.
+
+        Full audio is still forwarded to ASR regardless of which window matched.
+
         Args:
             audio_bytes: Raw PCM audio (16-bit signed little-endian).
             sample_rate: Audio sample rate in Hz.
@@ -106,12 +120,79 @@ class SpeakerVerifier:
             )
 
         start_time = time.monotonic()
+        bytes_per_second = sample_rate * 2  # 16-bit = 2 bytes per sample
+        audio_duration = len(audio_bytes) / bytes_per_second
 
+        # --- Pass 1: verify the first N seconds ---
+        max_bytes = int(self.max_verify_seconds * bytes_per_second)
+        first_chunk = audio_bytes[:max_bytes]
+
+        _LOGGER.debug(
+            "Pass 1: verifying first %.1fs of %.1fs audio",
+            len(first_chunk) / bytes_per_second,
+            audio_duration,
+        )
+
+        result = self._verify_chunk(first_chunk, sample_rate)
+
+        if result.is_match:
+            elapsed = (time.monotonic() - start_time) * 1000
+            _LOGGER.debug("Pass 1 matched in %.0fms", elapsed)
+            return result
+
+        # --- Pass 2: sliding window over full audio ---
+        window_bytes = int(self.window_seconds * bytes_per_second)
+        step_bytes = int(self.step_seconds * bytes_per_second)
+
+        if len(audio_bytes) > max_bytes and len(audio_bytes) >= window_bytes:
+            _LOGGER.debug(
+                "Pass 1 rejected (%.4f). Pass 2: sliding %.1fs window "
+                "with %.1fs step over %.1fs audio",
+                result.similarity,
+                self.window_seconds,
+                self.step_seconds,
+                audio_duration,
+            )
+
+            best_result = result
+            offset = step_bytes  # skip first window (already checked in pass 1)
+
+            while offset + window_bytes <= len(audio_bytes):
+                window = audio_bytes[offset : offset + window_bytes]
+                window_result = self._verify_chunk(window, sample_rate)
+
+                if window_result.similarity > best_result.similarity:
+                    best_result = window_result
+
+                if window_result.is_match:
+                    elapsed = (time.monotonic() - start_time) * 1000
+                    window_start = offset / bytes_per_second
+                    _LOGGER.debug(
+                        "Pass 2 matched at %.1f–%.1fs in %.0fms",
+                        window_start,
+                        window_start + self.window_seconds,
+                        elapsed,
+                    )
+                    return window_result
+
+                offset += step_bytes
+
+            elapsed = (time.monotonic() - start_time) * 1000
+            _LOGGER.debug(
+                "Pass 2 finished with no match (best=%.4f) in %.0fms",
+                best_result.similarity,
+                elapsed,
+            )
+            return best_result
+
+        elapsed = (time.monotonic() - start_time) * 1000
+        _LOGGER.debug("Rejected in %.0fms (%.4f)", elapsed, result.similarity)
+        return result
+
+    def _verify_chunk(self, audio_bytes: bytes, sample_rate: int) -> VerificationResult:
+        """Verify a single chunk of audio against all enrolled voiceprints."""
         embedding = self._extract_embedding(audio_bytes, sample_rate)
 
-        embed_time = time.monotonic()
-
-        # Compare against all enrolled voiceprints
         all_scores: Dict[str, float] = {}
         best_score = -1.0
         best_speaker: Optional[str] = None
@@ -125,15 +206,6 @@ class SpeakerVerifier:
                 best_speaker = speaker_name
 
         is_match = best_score >= self.threshold
-
-        total_time = time.monotonic() - start_time
-        embed_elapsed = embed_time - start_time
-        _LOGGER.debug(
-            "Verification took %.0fms (embedding: %.0fms, comparison: %.0fms)",
-            total_time * 1000,
-            embed_elapsed * 1000,
-            (total_time - embed_elapsed) * 1000,
-        )
 
         return VerificationResult(
             is_match=is_match,
