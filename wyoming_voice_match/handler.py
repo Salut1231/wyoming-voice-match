@@ -6,6 +6,8 @@ import time
 import uuid
 from typing import Optional
 
+import numpy as np
+
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.client import AsyncClient
@@ -38,7 +40,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         wyoming_info: Info,
         verifier: SpeakerVerifier,
         upstream_uri: str,
-        asr_max_seconds: float = 10.0,
+        asr_max_seconds: float = 5.0,
         *args,
         **kwargs,
     ) -> None:
@@ -285,28 +287,57 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             await self.write_event(Transcript(text="").event())
             self._responded = True
 
+    # RMS energy above this level in the tail indicates background noise (TV, radio)
+    _NOISE_FLOOR_RMS = 500.0
+    # How many seconds of the tail to sample for noise detection
+    _NOISE_TAIL_SECONDS = 1.0
+
     def _trim_for_asr(
         self,
         audio_bytes: bytes,
         result: VerificationResult,
         bytes_per_second: int,
     ) -> bytes:
-        """Trim audio for ASR.
+        """Trim audio for ASR, but only if background noise is detected.
 
-        Sends the first asr_max_seconds of audio from the buffer.
-        The voice command is always at the start of the buffer (right
-        after the wake word), so this captures it while cutting off
-        trailing background noise from the VAD keeping the stream open.
+        Checks the RMS energy of the last second of audio. If it's
+        near-silence, sends the full buffer (no trimming needed). If
+        there's sustained energy (TV, radio), trims to asr_max_seconds
+        to cut off the noise tail.
         """
         max_bytes = int(self.asr_max_seconds * bytes_per_second)
-        trimmed = audio_bytes[:max_bytes]
-        _LOGGER.debug(
-            "[%s] ASR trim: first %.1fs of %.1fs",
-            self._session_id,
-            len(trimmed) / bytes_per_second,
-            len(audio_bytes) / bytes_per_second,
-        )
-        return trimmed
+        audio_duration = len(audio_bytes) / bytes_per_second
+
+        # If buffer is shorter than the cap, no trimming needed regardless
+        if len(audio_bytes) <= max_bytes:
+            _LOGGER.debug(
+                "[%s] ASR trim: buffer (%.1fs) within limit (%.1fs), sending all",
+                self._session_id, audio_duration, self.asr_max_seconds,
+            )
+            return audio_bytes
+
+        # Check the tail of the buffer for background noise
+        tail_bytes = int(self._NOISE_TAIL_SECONDS * bytes_per_second)
+        tail = audio_bytes[-tail_bytes:]
+        tail_samples = np.frombuffer(tail, dtype=np.int16).astype(np.float32)
+        tail_rms = float(np.sqrt(np.mean(tail_samples ** 2)))
+
+        if tail_rms < self._NOISE_FLOOR_RMS:
+            # Tail is quiet — no background noise, send full buffer
+            _LOGGER.debug(
+                "[%s] ASR trim: tail RMS=%.0f (quiet), sending full %.1fs",
+                self._session_id, tail_rms, audio_duration,
+            )
+            return audio_bytes
+        else:
+            # Tail has sustained energy — background noise, trim
+            trimmed = audio_bytes[:max_bytes]
+            _LOGGER.debug(
+                "[%s] ASR trim: tail RMS=%.0f (noisy), trimming to %.1fs of %.1fs",
+                self._session_id, tail_rms,
+                len(trimmed) / bytes_per_second, audio_duration,
+            )
+            return trimmed
 
     def _elapsed_ms(self) -> float:
         """Milliseconds since stream start."""
