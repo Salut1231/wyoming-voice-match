@@ -192,7 +192,7 @@ All arguments have environment variable fallbacks for Docker configuration:
 | `--uri` | `LISTEN_URI` | `tcp://0.0.0.0:10350` | Wyoming server listen URI |
 | `--threshold` | `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold |
 | `--extraction-threshold` | `EXTRACTION_THRESHOLD` | `0.25` | Extraction similarity threshold |
-| `--require-speaker-match` | `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, bypass verification and forward all audio directly |
+| `--require-speaker-match` | `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, unmatched audio is forwarded instead of rejected — enrolled speakers still get extraction |
 | `--tag-speaker` | `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts |
 | `--debug` | `LOG_LEVEL=DEBUG` | `INFO` | Enable debug logging |
 | `--device` | `DEVICE` | `cuda` | `cuda` or `cpu` (auto-detects, falls back to cpu) |
@@ -258,20 +258,19 @@ handle_event(event) dispatches by event type:
 Describe → write Info event back (service discovery)
 Transcribe → store language preference
 AudioStart → reset all per-stream state (including _audio_stopped)
-AudioChunk → ALWAYS append to buffer, check early verify trigger if not yet started (skipped in bypass mode)
-AudioStop → set _audio_stopped event, then either log (if responded), forward directly (bypass mode), or call _process_audio_sync
+AudioChunk → ALWAYS append to buffer, check early verify trigger if not yet started
+AudioStop → set _audio_stopped event, then either log (if responded) or call _process_audio_sync
 ```
 
 **AudioChunk handler (critical detail):**
 1. Always append chunk audio to `_audio_buffer` regardless of `_responded` state
-2. Only check early verification trigger if `require_speaker_match and not _verify_started and not _responded`
+2. Only check early verification trigger if `not _verify_started and not _responded`
 3. If `buffered_seconds >= max_verify_seconds`: set `_verify_started = True`, snapshot buffer, create `_run_early_pipeline` task
 
 **AudioStop handler:**
 1. Always set `_audio_stopped.set()` (even if already responded)
 2. If `_responded` is True, log and return
-3. If `require_speaker_match` is False, call `_forward_without_verification()` (bypass mode)
-4. Otherwise call `_process_audio_sync()` (short audio fallback)
+3. Otherwise call `_process_audio_sync()` (verifies and forwards; if rejected and `require_speaker_match` is false, forwards unmodified audio instead of returning empty transcript)
 
 ### _run_early_pipeline(verify_audio: bytes)
 
@@ -305,15 +304,8 @@ Fallback path when early verification hasn't responded (short audio or early ver
 3. If no cache → first-time verification on full buffer
 4. If matched and audio > 3s → run speaker extraction, forward extracted audio to ASR, apply speaker tagging if enabled
 5. If matched and audio ≤ 3s → forward full buffer to ASR (too short for meaningful extraction)
-6. If rejected → return empty transcript
-
-### _forward_without_verification()
-
-Bypass path when `require_speaker_match` is false. Forwards all buffered audio directly to upstream ASR without verification or extraction.
-
-1. If empty buffer → return empty transcript
-2. Forward full buffer to ASR via `_forward_to_upstream()`
-3. Log pipeline result with "(bypass, no verification)" indicator
+6. If rejected and `require_speaker_match` is true → return empty transcript
+7. If rejected and `require_speaker_match` is false → forward full buffer unmodified to ASR
 
 ### _forward_to_upstream(audio_bytes: bytes) → str
 
@@ -999,7 +991,7 @@ services:
       - EXTRACTION_THRESHOLD=0.25
       - LOG_LEVEL=DEBUG
       - HF_HOME=/data/hf_cache
-      # - REQUIRE_SPEAKER_MATCH=true       # Set to false to bypass verification
+      # - REQUIRE_SPEAKER_MATCH=true       # Set to false to forward unmatched audio
       # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
       # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
       # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass
@@ -1032,7 +1024,7 @@ services:
       - EXTRACTION_THRESHOLD=0.25
       - LOG_LEVEL=DEBUG
       - HF_HOME=/data/hf_cache
-      # - REQUIRE_SPEAKER_MATCH=true       # Set to false to bypass verification
+      # - REQUIRE_SPEAKER_MATCH=true       # Set to false to forward unmatched audio
       # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
       # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
       # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass

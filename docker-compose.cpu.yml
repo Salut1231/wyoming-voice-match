@@ -14,7 +14,7 @@ services:
       - EXTRACTION_THRESHOLD=0.25
       - LOG_LEVEL=DEBUG
       - HF_HOME=/data/hf_cache
-      # - REQUIRE_SPEAKER_MATCH=true       # Set to false to bypass verification
+      # - REQUIRE_SPEAKER_MATCH=true       # Set to false to forward unmatched audio
       # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
       # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
       # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass

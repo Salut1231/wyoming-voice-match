@@ -253,7 +253,7 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
 | `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold for speaker verification (0.0-1.0) |
 | `EXTRACTION_THRESHOLD` | `0.25` | Cosine similarity threshold for speaker extraction — regions below this are discarded |
-| `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, audio is forwarded to ASR without verification or extraction — useful before enrollment or for mixed households |
+| `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, unmatched audio is forwarded to ASR instead of being rejected — enrolled speakers still get verification and extraction |
 | `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts (useful for LLM-based conversation agents) |
 | `LOG_LEVEL` | `DEBUG` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`). Auto-detects: falls back to CPU if CUDA is unavailable |
