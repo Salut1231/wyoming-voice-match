@@ -7,6 +7,12 @@ linguistic content.
 
 Disabled by default (ENHANCE_AUDIO=false). When enabled, runs after
 speaker extraction and before ASR forwarding.
+
+The ENHANCE_AMOUNT parameter (0.0–1.0) controls how aggressively the
+enhancement is applied by blending the enhanced signal with the original:
+    0.0 = original audio (no effect)
+    0.5 = 50/50 blend (moderate denoising, preserves voice naturalness)
+    1.0 = full SepFormer output (maximum denoising, may distort voice)
 """
 
 import logging
@@ -29,6 +35,10 @@ class SpeechEnhancer:
     operates on raw waveforms and is language-agnostic — it separates
     speech patterns from noise patterns regardless of language.
 
+    The enhance_amount parameter blends the enhanced signal with the
+    original (wet/dry mix), letting you trade off noise removal against
+    voice naturalness.
+
     Expected input: 16-bit PCM audio at 16kHz (matching Wyoming format).
     """
 
@@ -37,6 +47,7 @@ class SpeechEnhancer:
         model_dir: str = "/data/models",
         device: str = "cuda",
         model_source: str = DEFAULT_ENHANCE_MODEL,
+        enhance_amount: float = 1.0,
     ) -> None:
         from speechbrain.inference.separation import SepformerSeparation
 
@@ -48,14 +59,15 @@ class SpeechEnhancer:
             )
             device = "cpu"
         self.device = device
+        self.enhance_amount = max(0.0, min(1.0, enhance_amount))
 
         # Derive a save directory name from the model source
         model_name = model_source.replace("/", "--")
         savedir = f"{model_dir}/{model_name}"
 
         _LOGGER.info(
-            "Loading speech enhancement model: %s (device=%s)",
-            model_source, device,
+            "Loading speech enhancement model: %s (device=%s, amount=%.2f)",
+            model_source, device, self.enhance_amount,
         )
 
         run_opts = {"device": device} if device == "cuda" else {}
@@ -75,6 +87,9 @@ class SpeechEnhancer:
     ) -> bytes:
         """Enhance audio by removing background noise.
 
+        Blends the SepFormer-enhanced signal with the original based on
+        enhance_amount (0.0 = original, 1.0 = fully enhanced).
+
         Args:
             audio_bytes: Raw PCM audio (16-bit signed, mono).
             sample_rate: Sample rate in Hz (must be 16000).
@@ -89,7 +104,8 @@ class SpeechEnhancer:
         # Convert raw PCM bytes to float32 tensor [-1.0, 1.0]
         num_samples = len(audio_bytes) // sample_width
         samples = struct.unpack(f"<{num_samples}h", audio_bytes)
-        waveform = torch.FloatTensor(samples).unsqueeze(0) / 32768.0
+        original = torch.FloatTensor(samples) / 32768.0
+        waveform = original.unsqueeze(0)
 
         # Move to model device
         waveform = waveform.to(self.device)
@@ -101,9 +117,16 @@ class SpeechEnhancer:
         # Take the first (only) source, squeeze to 1D
         enhanced_wav = enhanced[:, :, 0].squeeze(0).cpu()
 
-        # Clamp to valid range
-        enhanced_wav = torch.clamp(enhanced_wav, -1.0, 1.0)
+        # Blend enhanced with original (wet/dry mix)
+        if self.enhance_amount < 1.0:
+            blended = (
+                self.enhance_amount * enhanced_wav
+                + (1.0 - self.enhance_amount) * original
+            )
+        else:
+            blended = enhanced_wav
 
-        # Convert back to 16-bit PCM bytes
-        pcm_samples = (enhanced_wav * 32767.0).to(torch.int16)
+        # Clamp to valid range and convert back to 16-bit PCM bytes
+        blended = torch.clamp(blended, -1.0, 1.0)
+        pcm_samples = (blended * 32767.0).to(torch.int16)
         return struct.pack(f"<{len(pcm_samples)}h", *pcm_samples.tolist())

@@ -197,6 +197,7 @@ All arguments have environment variable fallbacks for Docker configuration:
 | `--require-speaker-match` | `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, unmatched audio is forwarded instead of rejected — enrolled speakers still get extraction |
 | `--tag-speaker` | `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts |
 | `--enhance-audio` | `ENHANCE_AUDIO` | `false` | Run speech enhancement on extracted audio before ASR (experimental) |
+| `--enhance-amount` | `ENHANCE_AMOUNT` | `1.0` | Enhancement wet/dry blend: 0.0=original, 1.0=fully enhanced |
 | `--debug` | `LOG_LEVEL=DEBUG` | `INFO` | Enable debug logging |
 | `--device` | `DEVICE` | `cuda` | `cuda` or `cpu` (auto-detects, falls back to cpu) |
 | `--voiceprints-dir` | `VOICEPRINTS_DIR` | `/data/voiceprints` | Directory with .npy voiceprints |
@@ -1028,6 +1029,7 @@ services:
       # - REQUIRE_SPEAKER_MATCH=true       # Set to false to forward unmatched audio
       # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
       # - ENHANCE_AUDIO=false              # Run speech enhancement before ASR (experimental)
+      # - ENHANCE_AMOUNT=1.0               # Enhancement blend: 0.0=original, 1.0=fully enhanced
       # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
       # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass
       # - VERIFY_STEP_SECONDS=1.5          # Sliding window step size
@@ -1062,6 +1064,7 @@ services:
       # - REQUIRE_SPEAKER_MATCH=true       # Set to false to forward unmatched audio
       # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
       # - ENHANCE_AUDIO=false              # Run speech enhancement before ASR (experimental)
+      # - ENHANCE_AMOUNT=1.0               # Enhancement blend: 0.0=original, 1.0=fully enhanced
       # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
       # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass
       # - VERIFY_STEP_SECONDS=1.5          # Sliding window step size

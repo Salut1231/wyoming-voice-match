@@ -217,24 +217,46 @@ def main() -> None:
     enhancer = SpeechEnhancer(
         model_dir=args.model_dir,
         device=args.device,
+        enhance_amount=1.0,
     )
     load_ms = (time.monotonic() - enhance_start) * 1000
     print(f"  Model loaded:      {load_ms:.0f}ms")
 
+    # Run full enhancement once, then blend at different levels
     infer_start = time.monotonic()
-    enhanced_bytes = enhancer.enhance(extracted_bytes, sample_rate)
+    full_enhanced = enhancer.enhance(extracted_bytes, sample_rate)
     infer_ms = (time.monotonic() - infer_start) * 1000
     print(f"  Enhancement time:  {infer_ms:.0f}ms")
 
-    # Write enhanced WAV alongside the extracted output
+    # Write full enhanced version
     stem = output_path.stem
     enhanced_path = output_path.with_name(f"{stem}_enhanced{output_path.suffix}")
-    write_wav(str(enhanced_path), enhanced_bytes, sample_rate)
+    write_wav(str(enhanced_path), full_enhanced, sample_rate)
+    print(f"  Enhanced (100%):   {enhanced_path}")
 
-    print(f"  Enhanced written:  {enhanced_path}")
-    print(f"\n  Compare the two files to hear the difference:")
-    print(f"    Extracted:  {output_path}")
-    print(f"    Enhanced:   {enhanced_path}")
+    # Write blended versions at 25%, 50%, 75% for comparison
+    num_samples = len(extracted_bytes) // 2
+    original_samples = struct.unpack(f"<{num_samples}h", extracted_bytes)
+    enhanced_samples = struct.unpack(f"<{num_samples}h", full_enhanced)
+    original_f = torch.FloatTensor(original_samples) / 32768.0
+    enhanced_f = torch.FloatTensor(enhanced_samples) / 32768.0
+
+    for pct in [25, 50, 75]:
+        amount = pct / 100.0
+        blended = amount * enhanced_f + (1.0 - amount) * original_f
+        blended = torch.clamp(blended, -1.0, 1.0)
+        pcm = (blended * 32767.0).to(torch.int16)
+        blended_bytes = struct.pack(f"<{len(pcm)}h", *pcm.tolist())
+        blend_path = output_path.with_name(f"{stem}_enhanced_{pct}{output_path.suffix}")
+        write_wav(str(blend_path), blended_bytes, sample_rate)
+        print(f"  Enhanced ({pct:>3d}%):   {blend_path}")
+
+    print(f"\n  Compare files to find your preferred ENHANCE_AMOUNT:")
+    print(f"    {output_path.name:<40s}  (ENHANCE_AUDIO=false)")
+    print(f"    {stem}_enhanced_25{output_path.suffix:<25s}  (ENHANCE_AMOUNT=0.25)")
+    print(f"    {stem}_enhanced_50{output_path.suffix:<25s}  (ENHANCE_AMOUNT=0.50)")
+    print(f"    {stem}_enhanced_75{output_path.suffix:<25s}  (ENHANCE_AMOUNT=0.75)")
+    print(f"    {stem}_enhanced{output_path.suffix:<28s}  (ENHANCE_AMOUNT=1.00)")
     print()
 
 
