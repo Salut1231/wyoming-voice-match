@@ -188,19 +188,19 @@ All arguments have environment variable fallbacks for Docker configuration:
 
 | CLI Flag | Env Var | Default | Description |
 |---|---|---|---|
-| `--uri` | `LISTEN_URI` | `tcp://0.0.0.0:10350` | Wyoming server listen URI |
 | `--upstream-uri` | `UPSTREAM_URI` | `tcp://localhost:10300` | Upstream ASR service URI |
-| `--voiceprints-dir` | `VOICEPRINTS_DIR` | `/data/voiceprints` | Directory with .npy voiceprints |
+| `--uri` | `LISTEN_URI` | `tcp://0.0.0.0:10350` | Wyoming server listen URI |
 | `--threshold` | `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold |
 | `--extraction-threshold` | `EXTRACTION_THRESHOLD` | `0.25` | Extraction similarity threshold |
-| `--device` | `DEVICE` | `cuda` | `cuda` or `cpu` (auto-detects, falls back to cpu) |
-| `--model-dir` | `MODEL_DIR` | `/data/models` | Model cache directory |
+| `--require-speaker-match` | `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, bypass verification and forward all audio directly |
+| `--tag-speaker` | `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts |
 | `--debug` | `LOG_LEVEL=DEBUG` | `INFO` | Enable debug logging |
+| `--device` | `DEVICE` | `cuda` | `cuda` or `cpu` (auto-detects, falls back to cpu) |
+| `--voiceprints-dir` | `VOICEPRINTS_DIR` | `/data/voiceprints` | Directory with .npy voiceprints |
+| `--model-dir` | `MODEL_DIR` | `/data/models` | Model cache directory |
 | `--max-verify-seconds` | `MAX_VERIFY_SECONDS` | `5.0` | Early verification trigger |
 | `--window-seconds` | `VERIFY_WINDOW_SECONDS` | `3.0` | Sliding window size |
 | `--step-seconds` | `VERIFY_STEP_SECONDS` | `1.5` | Sliding window step |
-| `--tag-speaker` | `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts |
-| `--require-speaker-match` | `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, bypass verification and forward all audio directly |
 
 ### Startup Sequence
 
@@ -994,13 +994,16 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
+      - LISTEN_URI=tcp://0.0.0.0:10350
       - VERIFY_THRESHOLD=0.30
       - EXTRACTION_THRESHOLD=0.25
-      - LISTEN_URI=tcp://0.0.0.0:10350
-      - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
-      # - TAG_SPEAKER=true                # Prepend [speaker_name] to transcripts
+      - HF_HOME=/data/hf_cache
       # - REQUIRE_SPEAKER_MATCH=true       # Set to false to bypass verification
+      # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
+      # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
+      # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass
+      # - VERIFY_STEP_SECONDS=1.5          # Sliding window step size
     deploy:
       resources:
         reservations:
@@ -1024,13 +1027,16 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
+      - LISTEN_URI=tcp://0.0.0.0:10350
       - VERIFY_THRESHOLD=0.30
       - EXTRACTION_THRESHOLD=0.25
-      - LISTEN_URI=tcp://0.0.0.0:10350
-      - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
-      # - TAG_SPEAKER=true                # Prepend [speaker_name] to transcripts
+      - HF_HOME=/data/hf_cache
       # - REQUIRE_SPEAKER_MATCH=true       # Set to false to bypass verification
+      # - TAG_SPEAKER=false                # Prepend [speaker_name] to transcripts
+      # - MAX_VERIFY_SECONDS=5.0           # First-pass verification window
+      # - VERIFY_WINDOW_SECONDS=3.0        # Sliding window size for fallback pass
+      # - VERIFY_STEP_SECONDS=1.5          # Sliding window step size
 ```
 
 ### requirements.txt

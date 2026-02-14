@@ -93,9 +93,9 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
+      - LISTEN_URI=tcp://0.0.0.0:10350
       - VERIFY_THRESHOLD=0.30
       - EXTRACTION_THRESHOLD=0.25
-      - LISTEN_URI=tcp://0.0.0.0:10350
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
     deploy:
@@ -121,9 +121,9 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
+      - LISTEN_URI=tcp://0.0.0.0:10350
       - VERIFY_THRESHOLD=0.30
       - EXTRACTION_THRESHOLD=0.25
-      - LISTEN_URI=tcp://0.0.0.0:10350
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
 ```
@@ -250,17 +250,17 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | Variable | Default | Description |
 |---|---|---|
 | `UPSTREAM_URI` | `tcp://localhost:10300` | Wyoming URI of your real ASR service |
+| `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
 | `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold for speaker verification (0.0-1.0) |
 | `EXTRACTION_THRESHOLD` | `0.25` | Cosine similarity threshold for speaker extraction — regions below this are discarded |
-| `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
+| `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, audio is forwarded to ASR without verification or extraction — useful before enrollment or for mixed households |
+| `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts (useful for LLM-based conversation agents) |
+| `LOG_LEVEL` | `DEBUG` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`). Auto-detects: falls back to CPU if CUDA is unavailable |
 | `HF_HOME` | `/data/hf_cache` | HuggingFace cache directory for model downloads (persisted via volume) |
-| `LOG_LEVEL` | `DEBUG` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `MAX_VERIFY_SECONDS` | `5.0` | Seconds of audio to buffer before starting speaker verification |
 | `VERIFY_WINDOW_SECONDS` | `3.0` | Sliding window size (in seconds) for the fallback verification pass |
 | `VERIFY_STEP_SECONDS` | `1.5` | Step size (in seconds) between sliding windows |
-| `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts (useful for LLM-based conversation agents) |
-| `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, audio is forwarded to ASR without verification or extraction — useful before enrollment or for mixed households |
 
 ### Tuning the Threshold
 
