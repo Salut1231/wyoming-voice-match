@@ -2,6 +2,29 @@
 
 Complete technical specification for Wyoming Voice Match. This document contains enough detail to rebuild the project from scratch.
 
+## Table of Contents
+
+- [Project Structure](#project-structure)
+- [Core Concept](#core-concept)
+- [Dependencies](#dependencies)
+- [Pipeline Architecture](#pipeline-architecture)
+  - [Two Execution Paths](#two-execution-paths)
+  - [Speaker Verification (Three-Pass Strategy)](#speaker-verification-three-pass-strategy)
+  - [Speaker Extraction (Two-Stage)](#speaker-extraction-two-stage)
+  - [AudioStop Synchronization](#audiostop-synchronization)
+- [Entry Point (__main__.py)](#entry-point-__main__py)
+- [Handler (handler.py)](#handler-handlerpy)
+- [Verifier (verify.py)](#verifier-verifypy)
+- [Enrollment (scripts/enroll.py)](#enrollment-scriptsenrollpy)
+- [Satellite Enrollment Recording (scripts/enroll_record.py)](#satellite-enrollment-recording-scriptsenroll_recordpy)
+- [Test Script (scripts/test_verify.py)](#test-script-scriptstest_verifypy)
+- [Demo Script (scripts/demo.py)](#demo-script-scriptsdemopy)
+- [Docker Images](#docker-images)
+- [Concurrency Model](#concurrency-model)
+- [Observed Performance Characteristics](#observed-performance-characteristics)
+- [Design Decisions & Rationale](#design-decisions--rationale)
+- [Appendix: Complete Source Files](#appendix-complete-source-files)
+
 ## Project Structure
 
 ```

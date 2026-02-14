@@ -2,6 +2,26 @@
 
 A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifies speaker identity and extracts your voice from background noise before forwarding audio to a downstream speech-to-text service. Designed for [Home Assistant](https://www.home-assistant.io/) voice pipelines to prevent false activations from TVs, radios, and other people - and to deliver clean transcripts even in noisy environments.
 
+## Table of Contents
+
+- [The Problem](#the-problem)
+- [How It Works](#how-it-works)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+  - [Enroll Your Voice](#3-enroll-your-voice)
+  - [Recording from a Satellite](#recording-from-a-satellite)
+  - [Configure Home Assistant](#5-configure-home-assistant)
+- [Configuration](#configuration)
+  - [Environment Variables](#environment-variables)
+  - [Tuning the Threshold](#tuning-the-threshold)
+  - [Noisy Environment Tuning](#noisy-environment-tuning)
+  - [Speaker Tagging](#speaker-tagging)
+  - [Re-enrollment](#re-enrollment)
+  - [Demo: See Extraction in Action](#demo-see-extraction-in-action)
+- [Performance](#performance)
+- [Limitations](#limitations)
+- [License](#license)
+
 ## The Problem
 
 Home Assistant voice satellites listen for a wake word, then stream audio to a speech-to-text service. But the satellite microphone picks up everything - your voice, the TV in the background, other people talking. This causes two issues:
@@ -44,9 +64,9 @@ Wyoming Voice Match sits between Home Assistant and your ASR (speech-to-text) se
 
 ## Requirements
 
-- Docker and Docker Compose
-- NVIDIA GPU (recommended) or CPU
-- A downstream Wyoming-compatible ASR service (e.g., [wyoming-faster-whisper](https://github.com/rhasspy/wyoming-faster-whisper), [wyoming-onnx-asr](https://github.com/tboby/wyoming-onnx-asr))
+A running Wyoming-compatible ASR service such as [wyoming-faster-whisper](https://github.com/rhasspy/wyoming-faster-whisper) or [wyoming-onnx-asr](https://github.com/tboby/wyoming-onnx-asr). Wyoming Voice Match sits in front of this service as a proxy and forwards verified, cleaned audio to it.
+
+The Quick Start guide below uses Docker and Docker Compose for deployment. An NVIDIA GPU is recommended for fast inference (~5-25ms verification) but not required — CPU inference works at ~200-500ms. The scripts can also be run directly with Python 3.10+ and the dependencies listed in `requirements.txt`.
 
 ## Quick Start
 
