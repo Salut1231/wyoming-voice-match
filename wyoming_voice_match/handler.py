@@ -6,6 +6,9 @@ import time
 import uuid
 from typing import Optional
 
+import numpy as np
+import torch
+
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.client import AsyncClient
@@ -37,6 +40,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         upstream_uri: str,
         tag_speaker: bool = False,
         require_speaker_match: bool = True,
+        denoise_model=None,
         *args,
         **kwargs,
     ) -> None:
@@ -47,6 +51,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         self.upstream_uri = upstream_uri
         self.tag_speaker = tag_speaker
         self.require_speaker_match = require_speaker_match
+        self.denoise_model = denoise_model
 
         # Per-connection state
         self._audio_buffer = bytes()
@@ -218,6 +223,18 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         asr_duration = len(forward_audio) / bytes_per_second
         _LOGGER.debug("[%s] Forwarding %.1fs to ASR", sid, asr_duration)
 
+        # Denoise extracted audio if enabled
+        denoise_ms = 0.0
+        if self.denoise_model is not None:
+            denoise_start = time.monotonic()
+            forward_audio = self._denoise_audio(forward_audio)
+            denoise_ms = (time.monotonic() - denoise_start) * 1000
+            denoised_duration = len(forward_audio) / bytes_per_second
+            _LOGGER.debug(
+                "[%s] Denoised %.1fs in %.0fms",
+                sid, denoised_duration, denoise_ms,
+            )
+
         # Forward to ASR and respond immediately
         transcript = await self._forward_to_upstream(forward_audio)
         tagged = self._tag_transcript(transcript, speaker_name)
@@ -227,9 +244,9 @@ class SpeakerVerifyHandler(AsyncEventHandler):
         total_elapsed = self._elapsed_ms()
         _LOGGER.info(
             "[%s] Pipeline complete in %.0fms: \"%s\" "
-            "(verify=%.0fms, extract=%.0fms)",
+            "(verify=%.0fms, extract=%.0fms, denoise=%.0fms)",
             sid, total_elapsed, tagged,
-            verify_ms, extract_ms,
+            verify_ms, extract_ms, denoise_ms,
         )
 
     async def _process_audio_sync(self) -> None:
@@ -323,6 +340,18 @@ class SpeakerVerifyHandler(AsyncEventHandler):
                 sid, asr_duration,
             )
 
+            # Denoise extracted audio if enabled
+            denoise_ms = 0.0
+            if self.denoise_model is not None:
+                denoise_start = time.monotonic()
+                asr_audio = self._denoise_audio(asr_audio)
+                denoise_ms = (time.monotonic() - denoise_start) * 1000
+                denoised_duration = len(asr_audio) / bytes_per_second
+                _LOGGER.debug(
+                    "[%s] Denoised %.1fs in %.0fms",
+                    sid, denoised_duration, denoise_ms,
+                )
+
             asr_start = time.monotonic()
             transcript = await self._forward_to_upstream(asr_audio)
             tagged = self._tag_transcript(transcript, result.matched_speaker)
@@ -331,9 +360,9 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             total_elapsed = self._elapsed_ms()
             _LOGGER.info(
                 "[%s] Pipeline complete in %.0fms: \"%s\" "
-                "(verify=%.0fms, extract=%.0fms)",
+                "(verify=%.0fms, extract=%.0fms, denoise=%.0fms)",
                 sid, total_elapsed, tagged,
-                verify_ms, extract_ms,
+                verify_ms, extract_ms, denoise_ms,
             )
         else:
             if not self.require_speaker_match:
@@ -362,6 +391,27 @@ class SpeakerVerifyHandler(AsyncEventHandler):
                 )
                 await self.write_event(Transcript(text="").event())
                 self._responded = True
+
+    def _denoise_audio(self, audio_bytes: bytes) -> bytes:
+        """Apply Facebook Denoiser (Demucs) to 16-bit PCM audio."""
+        if self.denoise_model is None:
+            return audio_bytes
+
+        # Convert 16-bit PCM to float tensor
+        audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+        audio_tensor = torch.FloatTensor(audio_np.copy()) / 32768.0
+
+        # Model expects [batch, channels, time]
+        model_input = audio_tensor.unsqueeze(0).unsqueeze(0)
+
+        with torch.no_grad():
+            enhanced = self.denoise_model(model_input)
+
+        # Convert back to 16-bit PCM bytes
+        enhanced = enhanced.squeeze()
+        enhanced = torch.clamp(enhanced, -1.0, 1.0)
+        enhanced_np = (enhanced.numpy() * 32768.0).astype(np.int16)
+        return enhanced_np.tobytes()
 
     def _tag_transcript(self, transcript: str, speaker_name: Optional[str]) -> str:
         """Prepend [speaker_name] to transcript if tagging is enabled."""
