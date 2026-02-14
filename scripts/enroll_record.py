@@ -31,6 +31,7 @@ import os
 import struct
 import subprocess
 import sys
+import time
 from functools import partial
 from pathlib import Path
 
@@ -144,7 +145,8 @@ class EnrollRecordHandler(AsyncEventHandler):
             sample_num = self.state.samples_recorded
             remaining = self.state.target_samples - sample_num
 
-            filename = f"satellite_{sample_num:02d}.wav"
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"satellite_{timestamp}.wav"
             filepath = self.state.output_dir / filename
             write_wav(str(filepath), self._audio_buffer, self._audio_rate)
 
