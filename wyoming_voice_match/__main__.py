@@ -78,16 +78,14 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=float(os.environ.get("VERIFY_THRESHOLD", "0.20")),
-        help="Cosine similarity threshold for verification (default: 0.20)",
+        default=float(os.environ.get("VERIFY_THRESHOLD", "0.30")),
+        help="Cosine similarity threshold for verification (default: 0.30)",
     )
     parser.add_argument(
         "--extraction-threshold",
         type=float,
-        default=float(os.environ.get("EXTRACTION_THRESHOLD", "0"))
-        or None,
-        help="Cosine similarity threshold for speaker extraction "
-             "(default: VERIFY_THRESHOLD * 0.5)",
+        default=float(os.environ.get("EXTRACTION_THRESHOLD", "0.25")),
+        help="Cosine similarity threshold for speaker extraction (default: 0.25)",
     )
     parser.add_argument(
         "--device",
@@ -135,9 +133,6 @@ def get_args() -> argparse.Namespace:
 
 
 async def main() -> None:
-    import traceback
-    print("=== MAIN CALLED ===")
-    traceback.print_stack()
     """Run the Wyoming voice match proxy."""
     args = get_args()
 
@@ -180,18 +175,13 @@ async def main() -> None:
         )
         sys.exit(1)
 
-    extraction_display = (
-        f"{args.extraction_threshold:.2f}"
-        if args.extraction_threshold is not None
-        else f"{args.threshold * 0.5:.2f} (auto)"
-    )
     _LOGGER.info(
         "Speaker verifier ready — %d speaker(s) enrolled "
-        "(threshold=%.2f, extraction=%s, device=%s, verify_window=%.1fs, "
+        "(threshold=%.2f, extraction=%.2f, device=%s, verify_window=%.1fs, "
         "sliding_window=%.1fs/%.1fs)",
         len(verifier.voiceprints),
         args.threshold,
-        extraction_display,
+        args.extraction_threshold,
         args.device,
         args.max_verify_seconds,
         args.window_seconds,

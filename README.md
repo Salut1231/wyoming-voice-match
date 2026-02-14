@@ -73,7 +73,8 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - VERIFY_THRESHOLD=0.20
+      - VERIFY_THRESHOLD=0.30
+      - EXTRACTION_THRESHOLD=0.25
       - LISTEN_URI=tcp://0.0.0.0:10350
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
@@ -100,7 +101,8 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - VERIFY_THRESHOLD=0.20
+      - VERIFY_THRESHOLD=0.30
+      - EXTRACTION_THRESHOLD=0.25
       - LISTEN_URI=tcp://0.0.0.0:10350
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
@@ -228,7 +230,8 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 | Variable | Default | Description |
 |---|---|---|
 | `UPSTREAM_URI` | `tcp://localhost:10300` | Wyoming URI of your real ASR service |
-| `VERIFY_THRESHOLD` | `0.20` | Cosine similarity threshold for speaker verification (0.0-1.0) |
+| `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold for speaker verification (0.0-1.0) |
+| `EXTRACTION_THRESHOLD` | `0.25` | Cosine similarity threshold for speaker extraction — regions below this are discarded |
 | `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
 | `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`). Auto-detects: falls back to CPU if CUDA is unavailable |
 | `HF_HOME` | `/data/hf_cache` | HuggingFace cache directory for model downloads (persisted via volume) |
@@ -240,16 +243,16 @@ All configuration is done in the `environment` section of `docker-compose.yml`:
 
 ### Tuning the Threshold
 
-The `VERIFY_THRESHOLD` environment variable controls how strict speaker matching is. Adjust it in `docker-compose.yml` and restart:
+The `VERIFY_THRESHOLD` and `EXTRACTION_THRESHOLD` environment variables control how strict speaker matching is. Adjust them in `docker-compose.yml` and restart.
 
-| Value | Behavior |
+`VERIFY_THRESHOLD` determines whether the speaker is accepted at all. `EXTRACTION_THRESHOLD` determines which audio regions are kept when removing background audio. The extraction threshold should be lower than the verification threshold.
+
+| VERIFY_THRESHOLD | Behavior |
 |-------|----------|
-| `0.20` | **Default** - lenient, good for noisy environments with TV or background audio |
-| `0.30` | Moderate - good for varied voice volumes and distances |
-| `0.35` | Moderate - slightly stricter, still tolerant of quiet speech |
-| `0.45` | Balanced - good security with consistent mic distance |
-| `0.55` | Strict - fewer false accepts, but may reject you more often |
-| `0.65` | Very strict - high security, requires close mic and clear speech |
+| `0.25` | Lenient - may accept some TV audio, but rarely rejects the enrolled speaker |
+| `0.30` | **Default** - good balance for satellite mics with TV or background audio |
+| `0.40` | Moderate - works well with high-quality mics (PC, laptop, phone) |
+| `0.55` | Strict - fewer false accepts, but may reject quiet or distant speech |
 
 Start with debug logging enabled and observe the similarity scores:
 
@@ -260,28 +263,29 @@ docker compose logs -f wyoming-voice-match
 You'll see output like:
 
 ```
-INFO [971f8eb8] Speaker verified: jx (similarity=0.3787, threshold=0.20), forwarding to ASR immediately
-INFO [971f8eb8] Pipeline complete in 10649ms: "Tell me the weather" (verify=5ms, extract=39ms, asr=2100ms, processing=44ms)
-WARNING [3a2c1b9f] Speaker rejected in 5032ms (verify=252ms, best=0.1847, threshold=0.20, scores={'jx': '0.1847'})
+INFO [971f8eb8] Speaker verified: jx (similarity=0.3787, threshold=0.30), forwarding to ASR immediately
+INFO [971f8eb8] Pipeline complete in 10649ms: "Tell me the weather" (verify=5ms, extract=39ms)
+WARNING [3a2c1b9f] Speaker rejected in 5032ms (verify=252ms, best=0.1847, threshold=0.30, scores={'jx': '0.1847'})
 ```
 
-- **Your voice** will typically score **0.25-0.75** depending on conditions
-- **TV/other speakers** will typically score **0.05-0.20**
-- Set the threshold in the gap between these ranges
+- **Your voice** will typically score **0.35-0.70** depending on mic quality and command length
+- **TV/other speakers** will typically score **0.05-0.25**
+- Set the verification threshold in the gap between these ranges
+- Set the extraction threshold slightly below the verification threshold
 - If you're getting rejected when speaking quietly, **lower the threshold** or **re-enroll with more samples** recorded at different volumes and distances
 
-> **Being rejected too often?** The most effective fix is to add more enrollment samples. Record additional samples in the conditions where you're being rejected (e.g., speaking softly, further from the mic, different times of day) and re-run enrollment. More samples produce a more robust voiceprint that handles natural voice variation better.
+> **Being rejected too often?** The most effective fix is to add more enrollment samples. Record additional samples in the conditions where you're being rejected (e.g., speaking softly, further from the mic, different times of day) and re-run enrollment. More samples produce a more robust voiceprint that handles natural voice variation better. If using a satellite, record samples directly through it with `enroll_record` — see [Recording from a Satellite](#recording-from-a-satellite).
 
 ### Noisy Environment Tuning
 
-The default settings are already tuned for noisy environments (TV, radio, etc.). The speaker extraction automatically removes background audio by comparing each speech region against your voiceprint - only regions matching your voice are forwarded to ASR.
+The default settings are tuned for noisy environments (TV, radio, etc.). The speaker extraction automatically removes background audio by comparing each speech region against your voiceprint — only regions matching your voice are forwarded to ASR.
 
 If you need to adjust further:
 
 ```yaml
     environment:
-      - MAX_VERIFY_SECONDS=5.0   # Start verification after 5s
-      - VERIFY_THRESHOLD=0.20    # Low threshold to account for mixed audio
+      - VERIFY_THRESHOLD=0.30     # Accepts the speaker if any pass scores above this
+      - EXTRACTION_THRESHOLD=0.25 # Keeps audio regions scoring above this
 ```
 
 > **Note:** The satellite may continue showing a "listening" animation after the command has been processed. This is cosmetic - the proxy waits for the full stream to capture your complete command, but Home Assistant will have the transcript as soon as extraction and ASR finish.

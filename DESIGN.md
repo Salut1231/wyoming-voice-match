@@ -140,11 +140,11 @@ The final output is the concatenation of all kept (and potentially trimmed/rescu
 - Frame size for energy analysis: 50ms
 - Gap bridging: 300ms (joins speech regions separated by brief pauses)
 - Minimum region length for embedding: 1.0s (shorter segments produce unreliable embeddings)
-- Extraction similarity threshold: `VERIFY_THRESHOLD * 0.5` (default 0.10)
+- Extraction similarity threshold: `EXTRACTION_THRESHOLD` (default 0.25)
 - Sub-region scan minimum region length: 3.0s
 - Sub-region scan window: 1.5s, step: 0.5s
 - Trim threshold: midpoint of extraction threshold and region similarity
-- Rescue threshold: `VERIFY_THRESHOLD` (full verification threshold)
+- Rescue threshold: `VERIFY_THRESHOLD` (full verification threshold, default 0.30)
 - Noise floor: 10th percentile of frame RMS × 5, minimum 500
 
 ### AudioStop Synchronization
@@ -167,7 +167,8 @@ All arguments have environment variable fallbacks for Docker configuration:
 | `--uri` | `LISTEN_URI` | `tcp://0.0.0.0:10350` | Wyoming server listen URI |
 | `--upstream-uri` | `UPSTREAM_URI` | `tcp://localhost:10300` | Upstream ASR service URI |
 | `--voiceprints-dir` | `VOICEPRINTS_DIR` | `/data/voiceprints` | Directory with .npy voiceprints |
-| `--threshold` | `VERIFY_THRESHOLD` | `0.20` | Cosine similarity threshold |
+| `--threshold` | `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold |
+| `--extraction-threshold` | `EXTRACTION_THRESHOLD` | `0.25` | Extraction similarity threshold |
 | `--device` | `DEVICE` | `cuda` | `cuda` or `cpu` (auto-detects, falls back to cpu) |
 | `--model-dir` | `MODEL_DIR` | `/data/models` | Model cache directory |
 | `--debug` | `LOG_LEVEL=DEBUG` | `INFO` | Enable debug logging |
@@ -630,8 +631,14 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=float(os.environ.get("VERIFY_THRESHOLD", "0.20")),
-        help="Cosine similarity threshold for verification (default: 0.20)",
+        default=float(os.environ.get("VERIFY_THRESHOLD", "0.30")),
+        help="Cosine similarity threshold for verification (default: 0.30)",
+    )
+    parser.add_argument(
+        "--extraction-threshold",
+        type=float,
+        default=float(os.environ.get("EXTRACTION_THRESHOLD", "0.25")),
+        help="Cosine similarity threshold for speaker extraction (default: 0.25)",
     )
     parser.add_argument(
         "--device",
@@ -704,6 +711,7 @@ async def main() -> None:
         model_dir=args.model_dir,
         device=args.device,
         threshold=args.threshold,
+        extraction_threshold=args.extraction_threshold,
         max_verify_seconds=args.max_verify_seconds,
         window_seconds=args.window_seconds,
         step_seconds=args.step_seconds,
@@ -934,7 +942,8 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - VERIFY_THRESHOLD=0.20
+      - VERIFY_THRESHOLD=0.30
+      - EXTRACTION_THRESHOLD=0.25
       - LISTEN_URI=tcp://0.0.0.0:10350
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
@@ -962,7 +971,8 @@ services:
       - ./data:/data
     environment:
       - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - VERIFY_THRESHOLD=0.20
+      - VERIFY_THRESHOLD=0.30
+      - EXTRACTION_THRESHOLD=0.25
       - LISTEN_URI=tcp://0.0.0.0:10350
       - HF_HOME=/data/hf_cache
       - LOG_LEVEL=DEBUG
