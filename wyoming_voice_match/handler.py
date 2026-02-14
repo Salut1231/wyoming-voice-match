@@ -15,7 +15,7 @@ from wyoming.server import AsyncEventHandler
 
 from .verify import SpeakerVerifier, VerificationResult
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("handler")
 
 # Lock to prevent concurrent model inference
 _MODEL_LOCK = asyncio.Lock()
@@ -84,7 +84,7 @@ class SpeakerVerifyHandler(AsyncEventHandler):
             self._responded = False
             self._audio_stopped = asyncio.Event()
             self._stream_start_time = time.monotonic()
-            _LOGGER.debug("[%s] ── New audio session started ──", sid)
+            _LOGGER.info("[%s] ── New audio session started ──", sid)
             return True
 
         # Audio data — accumulate and trigger early verification + ASR
@@ -343,10 +343,18 @@ class SpeakerVerifyHandler(AsyncEventHandler):
                 self._log_pipeline_summary(transcript, verify_ms, 0.0, asr_ms)
             else:
                 total_elapsed = self._elapsed_ms()
-                _LOGGER.warning(
-                    "[%s] Speaker rejected in %.0fms (verify=%.0fms, best=%.4f, threshold=%.2f, scores=%s)",
-                    sid, total_elapsed, verify_ms, result.similarity, result.threshold,
-                    {n: f"{s:.4f}" for n, s in result.all_scores.items()},
+                _LOGGER.info(
+                    "[%s] ── Pipeline Summary ──\n"
+                    "  Step           Duration\n"
+                    "  ─────────────  ────────\n"
+                    "  Verify         %7.0fms\n"
+                    "  Total          %7.0fms\n"
+                    "\n"
+                    "  Result: REJECTED (best=%.4f, threshold=%.2f)\n"
+                    "  Scores: %s",
+                    sid, verify_ms, total_elapsed,
+                    result.similarity, result.threshold,
+                    ", ".join(f"{n}={s:.4f}" for n, s in result.all_scores.items()),
                 )
                 await self.write_event(Transcript(text="").event())
                 self._responded = True

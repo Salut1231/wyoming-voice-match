@@ -19,7 +19,7 @@ from . import __version__
 from .handler import SpeakerVerifyHandler
 from .verify import SpeakerVerifier
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("main")
 
 
 async def query_upstream_languages(uri: str, timeout: float = 10.0) -> List[str]:

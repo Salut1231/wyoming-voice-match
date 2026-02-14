@@ -11,7 +11,7 @@ import torch
 from scipy.spatial.distance import cosine
 from speechbrain.inference.speaker import EncoderClassifier
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("verify")
 
 
 @dataclass
