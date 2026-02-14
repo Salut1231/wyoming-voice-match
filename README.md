@@ -355,7 +355,20 @@ The script uses `VERIFY_THRESHOLD` and `EXTRACTION_THRESHOLD` from your `docker-
 The script will:
 - Verify the speaker against all enrolled voiceprints (showing similarity scores)
 - Run speaker extraction, showing each detected speech region and whether it was kept or discarded
-- Write the result as a WAV file containing only your voice
+- Write the extracted audio as a WAV file containing only your voice
+- Run speech enhancement at multiple blend levels for A/B comparison
+
+Output files produced:
+
+| File | Description |
+|------|-------------|
+| `cleaned.wav` | Extracted speaker audio (what ASR receives without enhancement) |
+| `cleaned_enhanced_25.wav` | 25% enhanced / 75% original blend |
+| `cleaned_enhanced_50.wav` | 50/50 blend (moderate denoising) |
+| `cleaned_enhanced_75.wav` | 75% enhanced / 25% original blend |
+| `cleaned_enhanced.wav` | Fully enhanced (maximum denoising) |
+
+Listen to each file and pick the blend level that gives you the best ASR results with the least voice distortion, then set `ENHANCE_AUDIO=true` and `ENHANCE_AMOUNT` to that value in your compose file.
 
 This is useful for understanding how the extraction works, tuning your thresholds, or just confirming that TV audio is being properly removed.
 
