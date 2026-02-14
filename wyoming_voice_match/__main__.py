@@ -141,12 +141,6 @@ def get_args() -> argparse.Namespace:
         default=os.environ.get("ENHANCE_AUDIO", "false").lower() in ("true", "1", "yes"),
         help="Run speech enhancement on extracted audio before ASR (default: false)",
     )
-    parser.add_argument(
-        "--enhance-amount",
-        type=float,
-        default=float(os.environ.get("ENHANCE_AMOUNT", "1.0")),
-        help="Enhancement wet/dry blend: 0.0=original, 1.0=fully enhanced (default: 1.0)",
-    )
 
     return parser.parse_args()
 
@@ -221,7 +215,6 @@ async def main() -> None:
         enhancer = SpeechEnhancer(
             model_dir=args.model_dir,
             device=args.device,
-            enhance_amount=args.enhance_amount,
         )
     else:
         _LOGGER.debug("Speech enhancement disabled (ENHANCE_AUDIO=false)")
