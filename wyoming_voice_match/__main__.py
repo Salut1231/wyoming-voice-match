@@ -135,6 +135,9 @@ def get_args() -> argparse.Namespace:
 
 
 async def main() -> None:
+    import traceback
+    print("=== MAIN CALLED ===")
+    traceback.print_stack()
     """Run the Wyoming voice match proxy."""
     args = get_args()
 
