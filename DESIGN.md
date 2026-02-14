@@ -435,8 +435,22 @@ Loads a WAV file, extracts an embedding, and compares against all enrolled voice
 
 CLI tool that runs the full verification and extraction pipeline on a WAV file, writing the extracted audio as a new WAV:
 ```bash
-python -m scripts.demo --speaker john --input /data/test.wav --output /data/cleaned.wav
+docker compose run --rm --entrypoint python wyoming-voice-match \
+  -m scripts.demo --speaker john --input /data/test.wav --output /data/cleaned.wav
 ```
+
+Thresholds are read from `VERIFY_THRESHOLD` and `EXTRACTION_THRESHOLD` environment variables (set in `docker-compose.yml`), matching the main service configuration.
+
+**Arguments:**
+
+| CLI Flag | Description |
+|---|---|
+| `--input`, `-i` | Input WAV file (any sample rate/channels — auto-converted) |
+| `--output`, `-o` | Output WAV file (extracted speaker audio only) |
+| `--speaker`, `-s` | Name of the enrolled speaker to extract |
+| `--voiceprints-dir` | Directory with .npy voiceprints (default: `/data/voiceprints`) |
+| `--model-dir` | Model cache directory (default: `/data/models`) |
+| `--device` | `cuda` or `cpu` (default: `cuda`) |
 
 **Process:**
 1. Load input WAV (any sample rate or channel count - automatically resampled to 16kHz mono)

@@ -4,6 +4,9 @@ Simulates what happens when audio is processed by the proxy: verifies the
 speaker, extracts their voice segments, and writes the result as a WAV file
 you can listen to and compare against the original.
 
+Thresholds are read from VERIFY_THRESHOLD and EXTRACTION_THRESHOLD environment
+variables (set in docker-compose.yml), matching the main service configuration.
+
 Usage:
     python -m scripts.demo --speaker john --input test.wav --output cleaned.wav
 
@@ -92,18 +95,15 @@ def main() -> None:
         help="Directory with cached speaker model",
     )
     parser.add_argument(
-        "--threshold",
-        type=float,
-        default=float(os.environ.get("VERIFY_THRESHOLD", "0.20")),
-        help="Cosine similarity threshold for verification (default: 0.20)",
-    )
-    parser.add_argument(
         "--device",
         default=os.environ.get("DEVICE", "cuda"),
         choices=["cuda", "cpu"],
         help="Inference device",
     )
     args = parser.parse_args()
+
+    threshold = float(os.environ.get("VERIFY_THRESHOLD", "0.30"))
+    extraction_threshold = float(os.environ.get("EXTRACTION_THRESHOLD", "0.25"))
 
     logging.getLogger().setLevel(logging.DEBUG)
 
@@ -143,7 +143,8 @@ def main() -> None:
         voiceprints_dir=args.voiceprints_dir,
         model_dir=args.model_dir,
         device=args.device,
-        threshold=args.threshold,
+        threshold=threshold,
+        extraction_threshold=extraction_threshold,
     )
 
     if not verifier.voiceprints:
@@ -157,7 +158,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"  Device:      {verifier.device}")
-    print(f"  Threshold:   {args.threshold:.2f}")
+    print(f"  Threshold:   {threshold:.2f} (extraction: {extraction_threshold:.2f})")
     print(f"  Speaker:     {args.speaker}")
 
     # Step 1: Verification
@@ -170,7 +171,7 @@ def main() -> None:
     print(f"  {'─' * 20} {'─' * 10}   {'─' * 10}")
 
     for name, score in sorted(result.all_scores.items()):
-        is_match = score >= args.threshold
+        is_match = score >= threshold
         marker = "MATCH" if is_match else ""
         print(f"  {name:<20} {score:>10.4f}   {marker}")
 

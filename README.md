@@ -323,17 +323,18 @@ Place a WAV file in your `data/` folder (any sample rate or channel count - it w
 docker compose run --rm --entrypoint python wyoming-voice-match \
   -m scripts.demo \
   --speaker john \
-  --threshold 0.20 \
   --input /data/test_audio.wav \
   --output /data/cleaned.wav
 ```
+
+The script uses `VERIFY_THRESHOLD` and `EXTRACTION_THRESHOLD` from your `docker-compose.yml` environment, so it behaves exactly like the main service.
 
 The script will:
 - Verify the speaker against all enrolled voiceprints (showing similarity scores)
 - Run speaker extraction, showing each detected speech region and whether it was kept or discarded
 - Write the result as a WAV file containing only your voice
 
-This is useful for understanding how the extraction works, tuning your threshold, or just confirming that TV audio is being properly removed.
+This is useful for understanding how the extraction works, tuning your thresholds, or just confirming that TV audio is being properly removed.
 
 ## Performance
 
