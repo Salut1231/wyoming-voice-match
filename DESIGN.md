@@ -219,9 +219,11 @@ The handler factory uses `functools.partial` to pass `wyoming_info`, `verifier`,
 
 The service registers as an ASR program named `"voice-match"` with model `"voice-match-proxy"`. At startup, it queries the upstream ASR service for its supported languages and advertises those same languages to Home Assistant. If the upstream is unreachable, it falls back to an empty language list. This makes it appear as a standard STT service in Home Assistant and ensures it can be assigned to any pipeline the upstream ASR supports.
 
-### query_upstream_languages(uri, timeout) → List[str]
+### query_upstream_languages(uri, timeout, max_retries, retry_delay) → List[str]
 
-Connects to the upstream ASR, sends a `Describe` event, and reads the `Info` response to collect all supported languages from its models. Returns a deduplicated list preserving order. Returns an empty list on any error (connection refused, timeout, etc.).
+Connects to the upstream ASR, sends a `Describe` event, and reads the `Info` response to collect all supported languages from its models. Returns a deduplicated list preserving order.
+
+Retries up to `max_retries` (default: 10) times with `retry_delay` (default: 3.0s) between attempts if the upstream is not ready. This handles the common case where both Voice Match and the ASR service start together in the same Docker Compose stack and the ASR takes longer to initialize. Returns an empty list if all retries are exhausted.
 
 ## Handler (handler.py)
 
@@ -617,38 +619,55 @@ from . import __version__
 from .handler import SpeakerVerifyHandler
 from .verify import SpeakerVerifier
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("main")
 
 
-async def query_upstream_languages(uri: str, timeout: float = 10.0) -> List[str]:
-    """Query the upstream ASR service for its supported languages."""
-    try:
-        async with AsyncClient.from_uri(uri) as client:
-            await client.write_event(Describe().event())
-            while True:
-                event = await asyncio.wait_for(client.read_event(), timeout=timeout)
-                if event is None:
-                    break
-                if Info.is_type(event.type):
-                    info = Info.from_event(event)
-                    languages = []
-                    for asr in info.asr:
-                        for model in asr.models:
-                            languages.extend(model.languages)
-                    seen = set()
-                    unique = []
-                    for lang in languages:
-                        if lang not in seen:
-                            seen.add(lang)
-                            unique.append(lang)
-                    if unique:
-                        _LOGGER.info(
-                            "Upstream ASR supports %d language(s): %s",
-                            len(unique), ", ".join(unique),
-                        )
-                        return unique
-    except Exception as exc:
-        _LOGGER.warning("Could not query upstream ASR languages: %s", exc)
+async def query_upstream_languages(
+    uri: str, timeout: float = 10.0, max_retries: int = 10, retry_delay: float = 3.0,
+) -> List[str]:
+    """Query the upstream ASR service for its supported languages.
+
+    Retries with backoff if the upstream isn't ready yet (common when both
+    services start together in the same Docker Compose stack).
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with AsyncClient.from_uri(uri) as client:
+                await client.write_event(Describe().event())
+                while True:
+                    event = await asyncio.wait_for(client.read_event(), timeout=timeout)
+                    if event is None:
+                        break
+                    if Info.is_type(event.type):
+                        info = Info.from_event(event)
+                        languages = []
+                        for asr in info.asr:
+                            for model in asr.models:
+                                languages.extend(model.languages)
+                        seen = set()
+                        unique = []
+                        for lang in languages:
+                            if lang not in seen:
+                                seen.add(lang)
+                                unique.append(lang)
+                        if unique:
+                            _LOGGER.info(
+                                "Upstream ASR supports %d language(s): %s",
+                                len(unique), ", ".join(unique),
+                            )
+                            return unique
+        except Exception as exc:
+            if attempt < max_retries:
+                _LOGGER.warning(
+                    "Upstream ASR not ready at %s (attempt %d/%d): %s — retrying in %.0fs",
+                    uri, attempt, max_retries, exc, retry_delay,
+                )
+                await asyncio.sleep(retry_delay)
+            else:
+                _LOGGER.warning(
+                    "Could not query upstream ASR languages after %d attempts: %s",
+                    max_retries, exc,
+                )
     return []
 
 

@@ -4,7 +4,7 @@ A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifi
 
 [![version](https://img.shields.io/github/v/release/jxlarrea/wyoming-voice-match?style=for-the-badge&color=orange)](https://github.com/jxlarrea/wyoming-voice-match/releases)
 [![Stars](https://img.shields.io/github/stars/jxlarrea/wyoming-voice-match?style=for-the-badge&color=yellow)](https://github.com/jxlarrea/wyoming-voice-match)
-[![GHCR](https://img.shields.io/badge/GHCR-Container-blue?style=for-the-badge&logo=docker)](https://github.com/jxlarrea/wyoming-voice-match/pkgs/container/wyoming-voice-match)
+[![GHCR](https://img.shields.io/badge/GHCR-Container-blue?style=for-the-badge&logo=docker&logoColor=green)](https://github.com/jxlarrea/wyoming-voice-match/pkgs/container/wyoming-voice-match)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
 
 
@@ -333,9 +333,27 @@ docker compose logs -f wyoming-voice-match
 You'll see output like:
 
 ```
-INFO [971f8eb8] Speaker verified: jx (similarity=0.3787, threshold=0.30), forwarding to ASR immediately
-INFO [971f8eb8] Pipeline complete in 10649ms: "Tell me the weather" (verify=5ms, extract=39ms)
-WARNING [3a2c1b9f] Speaker rejected in 5032ms (verify=252ms, best=0.1847, threshold=0.30, scores={'jx': '0.1847'})
+INFO [handler] [971f8eb8] ── New audio session started ──
+INFO [handler] [971f8eb8] Speaker verified: jx (similarity=0.3787, threshold=0.30), forwarding to ASR immediately
+INFO [handler] [971f8eb8] ── Pipeline Summary ──
+  Step           Duration
+  ─────────────  ────────
+  Verify              5ms
+  Extract            39ms  (10.2s → 3.1s, 70% discarded)
+  ASR               180ms
+  Total           10649ms
+
+  Transcript: "Tell me the weather"
+
+INFO [handler] [3a2c1b9f] ── New audio session started ──
+INFO [handler] [3a2c1b9f] ── Pipeline Summary ──
+  Step           Duration
+  ─────────────  ────────
+  Verify            252ms
+  Total            5032ms
+
+  Result: REJECTED (best=0.1847, threshold=0.30)
+  Scores: jx=0.1847
 ```
 
 - **Your voice** will typically score **0.35-0.70** depending on mic quality and command length
